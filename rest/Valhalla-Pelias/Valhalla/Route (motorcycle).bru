@@ -1,0 +1,60 @@
+meta {
+  name: Route (motorcycle)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{HOST}}:{{VALHALLA_PORT}}/route
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "id": "Route1",
+    "locations": [
+      {
+        "lat": 51.1325063347578,
+        "lon": 5.156485644553274
+      }, {
+        "lat": 51.08129793192213,
+        "lon": 5.818092866342889
+      }
+    ],
+    "costing": "motorcycle",
+    "costing_options": {
+      "motorcycle": {
+        "use_highways": 0,
+        "use_trails": 0,
+        "use_track": 0,
+        "coutry_crossing_cost": 0,
+        "use_distance": 0.5,
+        "top_speed": 160,
+        "height": 2.0,
+        "width": 1.25,
+        "length": 2.5,
+        "weithg": 0.5,
+        "maneuver_penalty": 0,
+        "exclude_unpaved": 1
+      }
+    },
+    "units": "km",
+    "language": "nl-NL",
+    "format": "json",
+    "alternates": 1,
+    "date_time": {
+      "type": 2,
+      "value": "2025-12-12T16:00"
+    },
+    "elevation_interval": 30,
+    "prioritize_bidirectional": true,
+    "turn_lanes": true
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

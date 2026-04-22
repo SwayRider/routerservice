@@ -1,0 +1,22 @@
+meta {
+  name: Reverse [*]
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_API_PORT}}/v1/reverse?point.lat=43.35936094135932&point.lon=-0.3659099042332642&layers=street
+  body: none
+  auth: inherit
+}
+
+params:query {
+  point.lat: 43.35936094135932
+  point.lon: -0.3659099042332642
+  layers: street
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

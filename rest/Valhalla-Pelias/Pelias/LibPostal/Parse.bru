@@ -1,0 +1,20 @@
+meta {
+  name: Parse
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_LIBPOSTAL_PORT}}/parse?address=oosthamsesteenweg 8, 2491 olmen, belgie
+  body: none
+  auth: inherit
+}
+
+params:query {
+  address: oosthamsesteenweg 8, 2491 olmen, belgie
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

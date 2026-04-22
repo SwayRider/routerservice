@@ -1,0 +1,21 @@
+meta {
+  name: Query
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_PLACEHOLDER_PORT}}/parser/query?text=oosthamsesteenweg 8 olmen&lang=nld
+  body: none
+  auth: inherit
+}
+
+params:query {
+  text: oosthamsesteenweg 8 olmen
+  lang: nld
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

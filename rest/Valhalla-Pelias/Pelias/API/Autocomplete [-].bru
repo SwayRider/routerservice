@@ -1,0 +1,32 @@
+meta {
+  name: Autocomplete [*]
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_API_PORT}}/v1/autocomplete?text=oosthamse&boundary.circle.lat=51.14199855661741&boundary.circle.lon=5.150576037544763&boundary.country=BE&boundary.circle.radius=10&focus.point.lat=51.14199855661741&focus.point.lon=5.150576037544763&layers=address,venue&size=3
+  body: none
+  auth: inherit
+}
+
+params:query {
+  text: oosthamse
+  boundary.circle.lat: 51.14199855661741
+  boundary.circle.lon: 5.150576037544763
+  boundary.country: BE
+  boundary.circle.radius: 10
+  focus.point.lat: 51.14199855661741
+  focus.point.lon: 5.150576037544763
+  layers: address,venue
+  size: 3
+}
+
+headers {
+  Accept-Language: nl-be
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

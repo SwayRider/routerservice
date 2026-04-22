@@ -1,0 +1,21 @@
+meta {
+  name: FindById
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_PLACEHOLDER_PORT}}/parser/findbyid?ids=1125872719&lang=nld
+  body: none
+  auth: inherit
+}
+
+params:query {
+  ids: 1125872719
+  lang: nld
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,21 @@
+meta {
+  name: PIP
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_PIP_PORT}}/:lon/:lat
+  body: none
+  auth: inherit
+}
+
+params:path {
+  lat: 38.720968799828256
+  lon: -9.19312920651557
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

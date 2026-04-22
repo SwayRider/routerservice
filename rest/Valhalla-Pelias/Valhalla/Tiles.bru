@@ -1,0 +1,26 @@
+meta {
+  name: Tiles
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{HOST}}:{{VALHALLA_PORT}}/tile
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "tile": {
+      "z": 4,
+      "x": 8,
+      "y": 5
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

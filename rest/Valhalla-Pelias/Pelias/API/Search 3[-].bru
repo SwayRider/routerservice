@@ -1,0 +1,30 @@
+meta {
+  name: Search 3[*]
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_API_PORT}}/v1/search?text=bouwelse steenweg 108, herenthout&layers=venue,address,neighbourhood,localadmin,locality,county,macrocounty,region,macroregion,country
+  body: none
+  auth: inherit
+}
+
+params:query {
+  text: bouwelse steenweg 108, herenthout
+  layers: venue,address,neighbourhood,localadmin,locality,county,macrocounty,region,macroregion,country
+  ~boundary.country: BE
+  ~boundary.circle.lat: 51.14199855661741
+  ~boundary.circle.lon: 5.150576037544763
+  ~boundary.circle.radius: 10
+  ~layers: coarse
+}
+
+headers {
+  Accept-Language: nl-be
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

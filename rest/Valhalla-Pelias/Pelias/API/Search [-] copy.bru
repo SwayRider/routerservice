@@ -1,0 +1,30 @@
+meta {
+  name: Search [*] copy
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_API_PORT}}/v1/search?text=vitalita&layers=venue,address,localadmin,locality
+  body: none
+  auth: inherit
+}
+
+params:query {
+  text: vitalita
+  layers: venue,address,localadmin,locality
+  ~boundary.country: BE
+  ~boundary.circle.lat: 51.14199855661741
+  ~boundary.circle.lon: 5.150576037544763
+  ~boundary.circle.radius: 10
+  ~layers: coarse
+}
+
+headers {
+  Accept-Language: nl-be
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,47 @@
+meta {
+  name: Route (1 region, a-b)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{ROUTERSERVICE_HOST}}:{{ROUTERSERVICE_PORT}}/api/v1/router/route
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+}
+
+body:json {
+  {
+    "id": "TestRoute-001",
+    "mode": "RM_MOTORCYCLE",
+    "result_mode": "RRM_NAVIGATION",
+    "unit": "U_METRIC",
+    "language": "nl-NL",
+    "route_type": "RT_SCENIC",
+    "locations": [
+      {
+        "location": {
+          "lat": 51.1326016136591,
+          "lon": 5.156528827039818
+        },
+        "type": 0
+      },
+      {
+        "location": {
+          "lat": 51.03248531407108,
+          "lon": 4.980005010100536
+        },
+        "type": 1
+      }
+    ]
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,21 @@
+meta {
+  name: Tokenize
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{HOST}}:{{PELIAS_PLACEHOLDER_PORT}}/parser/tokenize?text=de compagnie&lang=nld
+  body: none
+  auth: inherit
+}
+
+params:query {
+  text: de compagnie
+  lang: nld
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

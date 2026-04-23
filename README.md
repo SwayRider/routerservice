@@ -14,6 +14,7 @@ The routerservice exposes two server interfaces:
 ### Dependencies
 
 - **regionservice**: Region lookup and border crossing information
+- **authservice**: JWT public key discovery for request authentication
 - **Valhalla**: Open-source routing engine (one instance per region)
 - **Pelias** (optional): Geocoding service for address resolution
 
@@ -65,14 +66,16 @@ Default hostname pattern: `{prefix}{region-name}{postfix}:{port}`
 
 | Environment Variable | CLI Flag | Default | Description |
 | -------------------- | -------- | ------- | ----------- |
+| `AUTHSERVICE_HOST` | `-authservice-host` | | Auth service host |
+| `AUTHSERVICE_PORT` | `-authservice-port` | | Auth service port |
 | `REGIONSERVICE_HOST` | `-regionservice-host` | | Region service host |
 | `REGIONSERVICE_PORT` | `-regionservice-port` | | Region service port |
 
 ## API Reference
 
-The API is defined in the Protocol Buffer files at `backend/protos/router/v1/` and `backend/protos/health/v1/`.
+The API is defined in the Protocol Buffer files at `protos/router/v1/router.proto` and `protos/health/v1/health.proto`.
 
-All endpoints are public and require no authentication.
+Requests require JWT authentication via the `Authorization: Bearer <token>` header.
 
 ---
 
@@ -83,7 +86,7 @@ All endpoints are public and require no authentication.
 Simple health check that returns HTTP 200.
 
 - **Endpoint:** `GET /api/v1/health/ping`
-- **Access:** Public
+- **Access:** Public (no authentication required)
 
 ---
 
@@ -94,7 +97,7 @@ Simple health check that returns HTTP 200.
 Calculates a route between two or more locations.
 
 - **Endpoint:** `POST /api/v1/router/route`
-- **Access:** Public
+- **Access:** Authenticated
 
 ```bash
 curl --request POST \
@@ -150,17 +153,36 @@ Response:
 
 ### Request Parameters
 
+All request parameters are defined in `protos/router/v1/router.proto`. The following summarizes the implemented options:
+
+#### Top-Level Request Options
+
+| Option | Type | Implemented | Description |
+| ------ | ---- | ----------- | ----------- |
+| `id` | string | Yes | Unique route identifier |
+| `mode` | RoutingMode | Yes | Routing mode |
+| `resultMode` | RoutingResultMode | Yes | Response detail level |
+| `unit` | Unit | Yes | Distance unit (metric/imperial) |
+| `language` | string | Yes | Response language |
+| `locations` | RouteLocation[] | Yes | Waypoints |
+| `exclude_locations` | RouteLocation[] | Yes | Locations to avoid |
+| `exclude_polygons` | Polygon[] | Yes | Areas to avoid |
+| `dateTime` | DateTime | **No** | Departure/arrival time |
+| `routeOptions` | RouteOptions | Yes | Road type preferences |
+| `vehicleInfo` | VehicleInfo | **No** | Vehicle specifications |
+| `routeType` | RouteType | Yes | Route optimization type |
+| `scenicPreference` | float | Yes | Scenic route preference |
+| `highwayAvoidance` | float | Yes | Highway avoidance |
+| `tollAvoidance` | float | Yes | Toll avoidance |
+| `unpavedHandling` | UnpavedHandling | Yes | Unpaved road handling |
+
 #### Routing Modes (`mode`)
 
 | Mode | Description |
 | ---- | ----------- |
 | `RM_CAR` | Standard car routing |
-| `RM_TRUCK` | Truck routing with height/weight restrictions |
 | `RM_MOTORCYCLE` | Motorcycle routing |
 | `RM_MOTORSCOOTER` | Motor scooter routing (avoids highways) |
-| `RM_BICYCLE` | Bicycle routing |
-| `RM_PEDESTRIAN` | Walking directions |
-| `RM_TRANSIT` | Public transit routing |
 
 #### Result Modes (`resultMode`)
 
@@ -227,15 +249,6 @@ Response:
 | `highway` | Is this a highway |
 | `lanes` | Lane guidance information |
 
----
-
-### Ping
-
-Simple endpoint that returns HTTP 200.
-
-- **Endpoint:** `GET /api/v1/router/ping`
-- **Access:** Public
-
 ## Cross-Region Routing
 
 When a route crosses region boundaries, the service:
@@ -258,25 +271,35 @@ For cross-region routes, border crossings are selected based on:
 
 ## Error Handling
 
-| Error | Description |
-| ----- | ----------- |
+| gRPC Code | Description |
+| --------- | ----------- |
+| `NotFound` | Location outside known regions |
+| `NotFound` | No route found between points |
+| `Unavailable` | Valhalla service unavailable |
+| `Internal` | All other errors (regionservice failure, etc.) |
 | `InvalidArgument` | Missing locations or invalid parameters |
-| `InvalidArgument` | Location outside known regions |
-| `InvalidArgument` | No route found between points |
-| `Internal` | Valhalla or regionservice communication failure |
 
 ## Building
 
 ```bash
-# Generate protobuf code (run from repo root)
-make proto
+# Generate protobuf code (from repo root)
+cd protos && make proto
 
 # Build the service
-cd backend
-go build ./services/routerservice/cmd/routerservice
+go build -o routerservice ./cmd/routerservice/main.go
+```
 
-# Run the service
-go run ./services/routerservice/cmd/routerservice
+## Running
+
+```bash
+# With default ports (8080/8081)
+./routerservice
+
+# With environment variables (for local development)
+HTTP_PORT=8082 GRPC_PORT=8083 ./routerservice
+
+# With CLI flags
+./routerservice -http-port=8082 -grpc-port=8083
 ```
 
 ## Docker

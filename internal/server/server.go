@@ -12,6 +12,7 @@ import (
 
 func init() {
 	security.PublicEndpoint("/health.v1.HealthService/Ping")
+	security.UserOrServiceEndpoint("/router.v1.RouterService/Route", []string{"routing:execute"})
 }
 
 type RouterServer struct {

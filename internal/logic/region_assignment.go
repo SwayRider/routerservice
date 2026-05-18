@@ -17,6 +17,7 @@ type RegionAssignment struct {
 
 func CalculateRegionAssignment(
 	client *regionclient.Client,
+	token string,
 	locationList []*pbgeo.Coordinate,
 	l *log.Logger,
 ) (
@@ -26,7 +27,7 @@ func CalculateRegionAssignment(
 ) {
 	lg := l.Derive(log.WithFunction("CalculateRegionAssignment"))
 
-	resolveList, err := ResolveRegions(client, locationList, lg)
+	resolveList, err := ResolveRegions(client, token, locationList, lg)
 	if err != nil {
 		lg.Errorf("Failed to resolve regions: %v", err)
 		err = ErrNoRouteFound
@@ -66,7 +67,7 @@ func CalculateRegionAssignment(
 	}
 
 	assignmentList, routePossible, err  = injectTransferRegions(
-		client, tmpAssignmentList, lg)
+		client, token, tmpAssignmentList, lg)
 	if err != nil {
 		lg.Errorf("Failed to inject transfer regions: %v", err)
 		return
@@ -77,6 +78,7 @@ func CalculateRegionAssignment(
 
 func injectTransferRegions(
 	client *regionclient.Client,
+	token string,
 	assignmentList []*RegionAssignment,
 	l *log.Logger,
 ) (
@@ -92,9 +94,9 @@ func injectTransferRegions(
 	for i := 1; i < len(assignmentList); i++ {
 		fromRegion := assignmentList[i-1].Region
 		toRegion := assignmentList[i].Region
-		
+
 		var path []string
-		path, err = client.FindRegionPath(fromRegion, toRegion)
+		path, err = client.FindRegionPath(token, fromRegion, toRegion)
 		if err != nil {
 			lg.Errorf("Failed to find path between %s and %s: %v", fromRegion, toRegion, err)
 			return

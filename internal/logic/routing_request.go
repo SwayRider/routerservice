@@ -236,6 +236,7 @@ func CreateRoutingRequests(
 
 func (lst *RoutingRequestList) AddBorderCrossings(
 	regionClnt *regionclient.Client,
+	token string,
 	valhallaClnt *valhalla.Client,
 	mode routerv1.RoutingMode,
 	highwayPreference float64,
@@ -304,7 +305,7 @@ func (lst *RoutingRequestList) AddBorderCrossings(
 		// Find top-3 crossings
 		var crossings []regionclient.BorderCrossing
 		crossings, err = regionClnt.FindCrossingLocations(
-			region1, region2, c1, c2, config, 3)
+			token, region1, region2, c1, c2, config, 3)
 		if err != nil {
 			lg.Errorf("Failed to find border crossings: %v", err)
 			return

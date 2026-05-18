@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	_ "time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -31,7 +33,10 @@ func (s *RouterServer) Route(
 		)
 	}
 
-	locationList, regionAssignment, err := s.assignRegionsToLocations(req, lg)
+	// Forward the caller's token to regionservice calls downstream.
+	token := incomingToken(ctx)
+
+	locationList, regionAssignment, err := s.assignRegionsToLocations(req, token, lg)
 	if err != nil {
 		return nil, grpcStatus(err)
 	}
@@ -69,7 +74,7 @@ func (s *RouterServer) Route(
 		}
 
 		err := routingRequests.AddBorderCrossings(
-			s.regionClient, vhClient,
+			s.regionClient, token, vhClient,
 			req.Mode, highwayPref, primaryPref, maxPrimary, lg)
 		if err != nil {
 			return nil, grpcStatus(err)
@@ -106,8 +111,20 @@ func (s *RouterServer) Route(
 	return routeResponse, err
 }
 
+func incomingToken(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	if auth := md.Get("authorization"); len(auth) > 0 {
+		return strings.TrimPrefix(auth[0], "Bearer ")
+	}
+	return ""
+}
+
 func (s *RouterServer) assignRegionsToLocations(
 	req *routerv1.RouteRequest,
+	token string,
 	l *log.Logger,
 ) (
 	locationList []*pbgeo.Coordinate,
@@ -124,6 +141,7 @@ func (s *RouterServer) assignRegionsToLocations(
 	var routePossible bool
 	assignmentList, routePossible, err = logic.CalculateRegionAssignment(
 		s.regionClient,
+		token,
 		locationList,
 		lg,
 	)

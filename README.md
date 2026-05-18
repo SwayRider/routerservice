@@ -79,6 +79,17 @@ Requests require JWT authentication via the `Authorization: Bearer <token>` head
 
 ---
 
+## Authorization
+
+| gRPC endpoint | Access |
+|---|---|
+| `/health.v1.HealthService/Ping` | Public — no token required |
+| `/router.v1.RouterService/Route` | User JWT **or** service client token with `routing:execute` scope |
+
+Service clients (e.g. swayrider-api) must obtain a token from authservice using their `clientId` and `clientSecret`, then pass it as `Authorization: Bearer <token>` in the gRPC call metadata.
+
+---
+
 ### Health Endpoints
 
 #### Ping

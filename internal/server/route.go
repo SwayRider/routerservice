@@ -36,7 +36,7 @@ func (s *RouterServer) Route(
 	// Forward the caller's token to regionservice calls downstream.
 	token := incomingToken(ctx)
 
-	locationList, regionAssignment, err := s.assignRegionsToLocations(req, token, lg)
+	locationList, regionAssignment, err := s.assignRegionsToLocations(ctx, req, token, lg)
 	if err != nil {
 		return nil, grpcStatus(err)
 	}
@@ -74,7 +74,7 @@ func (s *RouterServer) Route(
 		}
 
 		err := routingRequests.AddBorderCrossings(
-			s.regionClient, token, vhClient,
+			ctx, s.regionClient, token, vhClient,
 			req.Mode, highwayPref, primaryPref, maxPrimary, lg)
 		if err != nil {
 			return nil, grpcStatus(err)
@@ -123,6 +123,7 @@ func incomingToken(ctx context.Context) string {
 }
 
 func (s *RouterServer) assignRegionsToLocations(
+	ctx context.Context,
 	req *routerv1.RouteRequest,
 	token string,
 	l *log.Logger,
@@ -140,6 +141,7 @@ func (s *RouterServer) assignRegionsToLocations(
 
 	var routePossible bool
 	assignmentList, routePossible, err = logic.CalculateRegionAssignment(
+		ctx,
 		s.regionClient,
 		token,
 		locationList,

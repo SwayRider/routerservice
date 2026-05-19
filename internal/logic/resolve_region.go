@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"context"
 	"slices"
 	"github.com/swayrider/grpcclients/regionclient"
 	pbgeo "github.com/swayrider/protos/common_types/geo"
@@ -17,9 +18,11 @@ func (r RegionResolvment) Contains(region string) bool {
 	return slices.Contains(r.CoreRegions, region) ||
 		slices.Contains(r.ExtendedRegions, region)
 }
-	
+
 func ResolveRegions(
+	ctx context.Context,
 	client *regionclient.Client,
+	token string,
 	locations []*pbgeo.Coordinate,
 	l *log.Logger,
 ) (
@@ -31,7 +34,7 @@ func ResolveRegions(
 	resolveList = make([]*RegionResolvment, 0, len(locations))
 	for _, location := range locations {
 		var resolvment *RegionResolvment
-		resolvment, err = ResolveRegion(client, location, lg)
+		resolvment, err = ResolveRegion(ctx, client, token, location, lg)
 		if err != nil {
 			lg.Errorf("Region resolvment failed: %v", err)
 			return
@@ -42,7 +45,9 @@ func ResolveRegions(
 }
 
 func ResolveRegion(
+	ctx context.Context,
 	client *regionclient.Client,
+	token string,
 	location *pbgeo.Coordinate,
 	l *log.Logger,
 ) (
@@ -56,7 +61,7 @@ func ResolveRegion(
 		Longitude: location.Lon,
 	}
 
-	regionList, err := client.SearchPoint(coord, true)
+	regionList, err := client.SearchPoint(ctx, token, coord, true)
 	if err != nil {
 		lg.Errorf("Failed to resolve region for coordinate %v: %v", coord, err)
 		return

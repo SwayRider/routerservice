@@ -5,8 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	//"io"
-	//"os"
+	"io"
 	"net/http"
 
 	"github.com/swayrider/routerservice/restclients/valhalla/types"
@@ -78,16 +77,20 @@ func (c Client) Locate(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d: %s", resp.StatusCode, body)
 	}
 
-	var locateResponse types.LocateResponse
-	err = json.NewDecoder(resp.Body).Decode(&locateResponse)
+	var locateResponses []types.LocateResponse
+	err = json.NewDecoder(resp.Body).Decode(&locateResponses)
 	if err != nil {
 		return nil, err
 	}
+	if len(locateResponses) == 0 {
+		return nil, nil
+	}
 
-	return &locateResponse, nil
+	return &locateResponses[0], nil
 }
 
 func (c Client) Route(
@@ -122,12 +125,9 @@ func (c Client) Route(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d: %s", resp.StatusCode, body)
 	}
-
-	/*os.Remove("./response.json")
-	buf, _ := io.ReadAll(resp.Body)
-	os.WriteFile("./response.json", buf, 0644)*/
 
 	var routeResponse types.RouteResponse
 	err = json.NewDecoder(resp.Body).Decode(&routeResponse)

@@ -167,6 +167,11 @@ func (s *RouterServer) createRequestOptions(
 		opts = append(opts, logic.LanguageOption(*req.Language))
 	}
 
+	// Unit
+	if req.Unit != routerv1.Unit_U_METRIC {
+		opts = append(opts, logic.UnitOption(req.Unit))
+	}
+
 	// Details of instructions
 	switch req.ResultMode {
 	case routerv1.RoutingResultMode_RRM_NAVIGATION:
@@ -304,14 +309,22 @@ func (s *RouterServer) buildCombinedRouteResponse(
 		return nil, err
 	}
 
+	borderIdx := make(map[int]bool)
 	for i := 1; i < len(respList); i++ {
-		part := respList[i]
-		err := addToRouteResponse(resp, part, lg)
+		borderIdx[len(resp.Trip.Locations)-1] = true
+		err := addToRouteResponse(resp, respList[i], lg)
 		if err != nil {
 			lg.Errorf("failed to add part to route response: %v", err)
 			return nil, err
 		}
 	}
+
+	if err := mergeRouteResponse(resp); err != nil {
+		lg.Errorf("failed to merge route legs: %v", err)
+		return nil, err
+	}
+
+	removeBorderLocations(resp.Trip, borderIdx)
 
 	return resp, nil
 }

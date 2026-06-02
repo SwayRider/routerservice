@@ -13,6 +13,11 @@ func grpcStatus(err error) error {
 		return nil
 	}
 
+	// Pass through gRPC status errors from downstream services (e.g. regionservice unreachable).
+	if st, ok := status.FromError(err); ok && st.Code() != codes.OK {
+		return status.Error(st.Code(), st.Message())
+	}
+
 	switch {
 	case errors.Is(err, logic.ErrValhallaUnavailable):
 		return status.Error(codes.Unavailable, err.Error())

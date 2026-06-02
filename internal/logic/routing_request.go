@@ -138,6 +138,21 @@ func CurvynessOption(curvyness float64) RoutingRequestOption {
 	}
 }
 
+func UnitOption(unit routerv1.Unit) RoutingRequestOption {
+	return &routingRequestOptionImpl{
+		fn: func(r *vhtypes.RouteRequest, _ string) {
+			switch unit {
+			case routerv1.Unit_U_IMPERIAL:
+				u := vhtypes.Miles
+				r.Units = &u
+			default:
+				u := vhtypes.Kilometers
+				r.Units = &u
+			}
+		},
+	}
+}
+
 func LanguageOption(language string) RoutingRequestOption {
 	lang := vhtypes.Language(language)
 	return &routingRequestOptionImpl{
@@ -155,28 +170,30 @@ type RoutingRequest struct {
 func (r *RoutingRequest) AppendBorderCrossing(
 	coordinate regionclient.Coordinate,
 ) (err error) {
-	lastLoc := r.RequestData.Locations[len(r.RequestData.Locations)-1]
-	borderLoc := lastLoc
-	borderLoc.Lon = coordinate.Longitude
-	borderLoc.Lat = coordinate.Latitude
-	if lastLoc.LocationKind != nil {
-		*lastLoc.LocationKind = vhtypes.Through
-	}
-	r.RequestData.Locations = append(r.RequestData.Locations, borderLoc)
+	// Mark the current last location as Through — it becomes an intermediate waypoint.
+	// Must assign a new pointer to avoid mutating any shared value.
+	through := vhtypes.Through
+	r.RequestData.Locations[len(r.RequestData.Locations)-1].LocationKind = &through
+
+	// The border crossing is the new Break endpoint of this segment.
+	r.RequestData.Locations = append(r.RequestData.Locations, vhtypes.Location{
+		Lat: coordinate.Latitude,
+		Lon: coordinate.Longitude,
+	})
 	return nil
 }
 
 func (r *RoutingRequest) PrependBorderCrossing(
 	coordinate regionclient.Coordinate,
 ) (err error) {
-	firstLoc := r.RequestData.Locations[0]
-	borderLoc := firstLoc
-	borderLoc.Lon = coordinate.Longitude
-	borderLoc.Lat = coordinate.Latitude
-	if firstLoc.LocationKind != nil {
-		*firstLoc.LocationKind = vhtypes.Through
-	}
-	r.RequestData.Locations = append([]vhtypes.Location{borderLoc}, r.RequestData.Locations...)
+	// Mark the current first location as Through — it becomes an intermediate waypoint.
+	through := vhtypes.Through
+	r.RequestData.Locations[0].LocationKind = &through
+
+	// The border crossing is the new Break start of this segment.
+	r.RequestData.Locations = append([]vhtypes.Location{
+		{Lat: coordinate.Latitude, Lon: coordinate.Longitude},
+	}, r.RequestData.Locations...)
 	return nil
 }
 
@@ -386,13 +403,13 @@ func getRoadType(
 	location orb.Point,
 	maxPrimary bool,
 ) *regionclient.RoadType {
-	req := vhtypes.NewLocateRequest(location.Lon(), location.Lat())
+	req := vhtypes.NewLocateRequest(location.Lat(), location.Lon())
 	//ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	resp, err := clnt.Locate(ctx, region, req)
 	defer cancel()
-	if err != nil {
+	if err != nil || resp == nil {
 		return nil
 	}
 	if len(resp.Edges) == 0 {

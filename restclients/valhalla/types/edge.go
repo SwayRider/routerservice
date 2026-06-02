@@ -1,5 +1,7 @@
 package types
 
+import "encoding/json"
+
 type EdgeId struct {
 	Id		int `json:"id"`
 	Value 	int `json:"value"`
@@ -68,7 +70,7 @@ type EdgeDetails struct {
 	Access Restriction `json:"access"`
 	Toll bool `json:"toll"`
 	RoundAbout bool `json:"round_about"`
-	BikeNetwork BikeNetwork `json:"bike_network"`
+	BikeNetwork json.RawMessage `json:"bike_network"`
 	EndRestriction Restriction `json:"end_restriction"`
 	Unreachable bool `json:"unreachable"`
 	Forward bool `json:"forward"`

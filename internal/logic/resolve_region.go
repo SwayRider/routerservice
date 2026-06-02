@@ -68,7 +68,7 @@ func ResolveRegion(
 	}
 
 	if len(regionList.CoreRegions) == 0 {
-		lg.Errorf("Failed to resolve region for coordinate %v: %v", coord, err)
+		lg.Errorf("No region found for coordinate %v", coord)
 		err = ErrLocationOutsideOfKnownRegions
 		return
 	}

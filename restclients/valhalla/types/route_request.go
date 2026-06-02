@@ -371,5 +371,6 @@ func (r *RouteRequest) SetPrimaryPreference(model string, preference float64) {
 	v := math.Max(0, math.Min(1, preference))
 	obj := r.CostingOptions[model]
 	obj.UsePrimary = &v
+	r.CostingOptions[model] = obj
 }
 

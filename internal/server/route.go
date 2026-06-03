@@ -377,9 +377,15 @@ func addTrip(
 		}
 		resp.Trip.Language = trip.Language.ToString()
 	}
-	addLocations(resp.Trip, trip.Locations, appendToResponse, lg)
-	addLegs(resp.Trip, trip.Legs, appendToResponse, lg)
-	createTripSummary(resp.Trip, &trip.Summary, appendToResponse, lg)
+	if err := addLocations(resp.Trip, trip.Locations, appendToResponse, lg); err != nil {
+		return err
+	}
+	if err := addLegs(resp.Trip, trip.Legs, appendToResponse, lg); err != nil {
+		return err
+	}
+	if err := createTripSummary(resp.Trip, &trip.Summary, appendToResponse, lg); err != nil {
+		return err
+	}
 
 	return nil
 }

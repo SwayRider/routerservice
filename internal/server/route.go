@@ -659,9 +659,15 @@ func createLeg(
 	leg.Shape = vhLeg.Shape
 	leg.ElevationInterval = vhLeg.ElevationInterval
 
-	addManeuvers(leg, vhLeg.Maneuvers, lg)
-	addElevation(leg, vhLeg.Elevation, lg)
-	createLegSummary(leg, &vhLeg.Summary, lg)
+	if err := addManeuvers(leg, vhLeg.Maneuvers, lg); err != nil {
+		return nil, err
+	}
+	if err := addElevation(leg, vhLeg.Elevation, lg); err != nil {
+		return nil, err
+	}
+	if err := createLegSummary(leg, &vhLeg.Summary, lg); err != nil {
+		return nil, err
+	}
 
 	return leg, nil
 }

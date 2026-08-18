@@ -172,8 +172,11 @@ func (r *RoutingRequest) AppendBorderCrossing(
 ) (err error) {
 	// Mark the current last location as Through — it becomes an intermediate waypoint.
 	// Must assign a new pointer to avoid mutating any shared value.
-	through := vhtypes.Through
-	r.RequestData.Locations[len(r.RequestData.Locations)-1].LocationKind = &through
+	// A transfer-region request starts with no locations, so there is nothing to mark yet.
+	if n := len(r.RequestData.Locations); n > 0 {
+		through := vhtypes.Through
+		r.RequestData.Locations[n-1].LocationKind = &through
+	}
 
 	// The border crossing is the new Break endpoint of this segment.
 	r.RequestData.Locations = append(r.RequestData.Locations, vhtypes.Location{
@@ -187,8 +190,11 @@ func (r *RoutingRequest) PrependBorderCrossing(
 	coordinate regionclient.Coordinate,
 ) (err error) {
 	// Mark the current first location as Through — it becomes an intermediate waypoint.
-	through := vhtypes.Through
-	r.RequestData.Locations[0].LocationKind = &through
+	// A transfer-region request starts with no locations, so there is nothing to mark yet.
+	if len(r.RequestData.Locations) > 0 {
+		through := vhtypes.Through
+		r.RequestData.Locations[0].LocationKind = &through
+	}
 
 	// The border crossing is the new Break start of this segment.
 	r.RequestData.Locations = append([]vhtypes.Location{
@@ -218,14 +224,18 @@ func CreateRoutingRequests(
 		req := vhtypes.NewRouteRequest(
 			model,
 		)
-		for i := assignment.FromIndex; i <= assignment.ToIndex; i++ {
-			routeLoc := routeLocations[i]
-			loc := vhtypes.NewLocation(
-				routeLoc.Location.Lat,
-				routeLoc.Location.Lon,
-			)
-			loc.SetKind(locationKind(routeLoc.Type))
-			req.AddLocation(*loc)
+		// Transfer-region assignments have no waypoint of their own (FromIndex/ToIndex
+		// are -1); their Locations are filled in later by AddBorderCrossings.
+		if !assignment.IsEmpty {
+			for i := assignment.FromIndex; i <= assignment.ToIndex; i++ {
+				routeLoc := routeLocations[i]
+				loc := vhtypes.NewLocation(
+					routeLoc.Location.Lat,
+					routeLoc.Location.Lon,
+				)
+				loc.SetKind(locationKind(routeLoc.Type))
+				req.AddLocation(*loc)
+			}
 		}
 
 		for _, opt := range opts {
@@ -276,11 +286,20 @@ func (lst *RoutingRequestList) AddBorderCrossings(
 		region1 := r1.Region
 		region2 := r2.Region
 
-		// Last location of first request and first location of second request
+		// Last location of first request and first location of second request.
+		// r1 always has at least one location by this point: it's either the first,
+		// real assignment, or it was r2 in the previous iteration and was already
+		// given a location by PrependBorderCrossing below. r2 can still be empty the
+		// first time it's seen (an as-yet-unpopulated transfer-region request), in
+		// which case fall back to r1's anchor point — there is no waypoint of its own
+		// to search near.
 		l1 := r1.RequestData.Locations[len(r1.RequestData.Locations)-1]
 		pt1 := orb.Point{l1.Lon, l1.Lat}
 		c1 := regionclient.Coordinate{Longitude: l1.Lon, Latitude: l1.Lat}
-		l2 := r2.RequestData.Locations[0]
+		l2 := l1
+		if len(r2.RequestData.Locations) > 0 {
+			l2 = r2.RequestData.Locations[0]
+		}
 		pt2 := orb.Point{l2.Lon, l2.Lat}
 		c2 := regionclient.Coordinate{Longitude: l2.Lon, Latitude: l2.Lat}
 

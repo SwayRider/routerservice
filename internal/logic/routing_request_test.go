@@ -4,8 +4,10 @@ import (
 	"testing"
 
 	"github.com/swayrider/grpcclients/regionclient"
+	pbgeo "github.com/swayrider/protos/common_types/geo"
 	routerv1 "github.com/swayrider/protos/router/v1"
 	vhtypes "github.com/swayrider/routerservice/restclients/valhalla/types"
+	log "github.com/swayrider/swlib/logger"
 )
 
 func rtPtr(rt regionclient.RoadType) *regionclient.RoadType {
@@ -182,6 +184,44 @@ func TestCloseRoadTypeOrder(t *testing.T) {
 	})
 }
 
+// TestCreateRoutingRequests_EmptyTransferAssignment verifies that a transfer-region
+// assignment (IsEmpty, FromIndex/ToIndex == -1) no longer panics on routeLocations[-1]
+// and instead produces a RoutingRequest with the transfer region's name and no
+// pre-populated locations (those are filled in later by AddBorderCrossings).
+func TestCreateRoutingRequests_EmptyTransferAssignment(t *testing.T) {
+	routeLocations := []*routerv1.RouteLocation{
+		{Location: &pbgeo.Coordinate{Lat: 52.3, Lon: 4.9}, Type: routerv1.LocationType_L_BREAK},
+		{Location: &pbgeo.Coordinate{Lat: 48.8, Lon: 2.3}, Type: routerv1.LocationType_L_BREAK},
+	}
+	assignmentList := []*RegionAssignment{
+		{Region: "nl", FromIndex: 0, ToIndex: 0},
+		{Region: "be", FromIndex: -1, ToIndex: -1, IsEmpty: true},
+		{Region: "fr", FromIndex: 1, ToIndex: 1},
+	}
+
+	requestList, err := CreateRoutingRequests(
+		nil, routerv1.RoutingMode_RM_CAR, routeLocations, assignmentList, log.New())
+	if err != nil {
+		t.Fatalf("CreateRoutingRequests error: %v", err)
+	}
+	if len(requestList) != 3 {
+		t.Fatalf("want 3 requests, got %d", len(requestList))
+	}
+
+	if requestList[0].Region != "nl" || len(requestList[0].RequestData.Locations) != 1 {
+		t.Errorf("requestList[0]: want region nl with 1 location, got region %q with %d locations",
+			requestList[0].Region, len(requestList[0].RequestData.Locations))
+	}
+	if requestList[1].Region != "be" || len(requestList[1].RequestData.Locations) != 0 {
+		t.Errorf("requestList[1]: want region be with 0 locations, got region %q with %d locations",
+			requestList[1].Region, len(requestList[1].RequestData.Locations))
+	}
+	if requestList[2].Region != "fr" || len(requestList[2].RequestData.Locations) != 1 {
+		t.Errorf("requestList[2]: want region fr with 1 location, got region %q with %d locations",
+			requestList[2].Region, len(requestList[2].RequestData.Locations))
+	}
+}
+
 // buildMinimalRoutingRequest creates a RoutingRequest with two Break locations.
 func buildMinimalRoutingRequest() *RoutingRequest {
 	req := vhtypes.NewRouteRequest(vhtypes.Auto)
@@ -244,5 +284,57 @@ func TestPrependBorderCrossing(t *testing.T) {
 	// Previous first (now index 1) must be Through.
 	if locs[1].LocationKind == nil || *locs[1].LocationKind != vhtypes.Through {
 		t.Errorf("locs[1].LocationKind: want Through, got %v", locs[1].LocationKind)
+	}
+}
+
+// TestAppendBorderCrossing_EmptyLocations verifies appending onto a transfer-region
+// request (no locations yet) doesn't panic and produces a single Break location.
+func TestAppendBorderCrossing_EmptyLocations(t *testing.T) {
+	rr := &RoutingRequest{
+		Region:      "be",
+		RequestData: vhtypes.NewRouteRequest(vhtypes.Auto),
+	}
+	crossing := regionclient.Coordinate{Latitude: 50.5, Longitude: 3.5}
+
+	if err := rr.AppendBorderCrossing(crossing); err != nil {
+		t.Fatalf("AppendBorderCrossing error: %v", err)
+	}
+
+	locs := rr.RequestData.Locations
+	if len(locs) != 1 {
+		t.Fatalf("want 1 location, got %d", len(locs))
+	}
+	if locs[0].Lat != crossing.Latitude || locs[0].Lon != crossing.Longitude {
+		t.Errorf("locs[0]: want {%.4f,%.4f}, got {%.4f,%.4f}",
+			crossing.Latitude, crossing.Longitude, locs[0].Lat, locs[0].Lon)
+	}
+	if locs[0].LocationKind != nil {
+		t.Errorf("locs[0].LocationKind: want nil (Break), got %v", *locs[0].LocationKind)
+	}
+}
+
+// TestPrependBorderCrossing_EmptyLocations verifies prepending onto a transfer-region
+// request (no locations yet) doesn't panic and produces a single Break location.
+func TestPrependBorderCrossing_EmptyLocations(t *testing.T) {
+	rr := &RoutingRequest{
+		Region:      "be",
+		RequestData: vhtypes.NewRouteRequest(vhtypes.Auto),
+	}
+	crossing := regionclient.Coordinate{Latitude: 52.5, Longitude: 4.5}
+
+	if err := rr.PrependBorderCrossing(crossing); err != nil {
+		t.Fatalf("PrependBorderCrossing error: %v", err)
+	}
+
+	locs := rr.RequestData.Locations
+	if len(locs) != 1 {
+		t.Fatalf("want 1 location, got %d", len(locs))
+	}
+	if locs[0].Lat != crossing.Latitude || locs[0].Lon != crossing.Longitude {
+		t.Errorf("locs[0]: want {%.4f,%.4f}, got {%.4f,%.4f}",
+			crossing.Latitude, crossing.Longitude, locs[0].Lat, locs[0].Lon)
+	}
+	if locs[0].LocationKind != nil {
+		t.Errorf("locs[0].LocationKind: want nil (Break), got %v", *locs[0].LocationKind)
 	}
 }

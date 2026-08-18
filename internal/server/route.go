@@ -115,7 +115,7 @@ func (s *RouterServer) Route(
 	}
 	routeResponse.Summary = buildRouteSummary(regionAssignment)
 
-	lg.Infof("regionAssignment: %v", regionAssignment)
+	lg.Debugf("regionAssignment: %v", regionAssignment)
 
 	return routeResponse, err
 }
@@ -395,6 +395,9 @@ func (s *RouterServer) buildCombinedRouteResponse(
 	l *log.Logger,
 ) (*routerv1.RouteResponse, error) {
 	lg := l.Derive(log.WithFunction("buildCombinedRouteResponse"))
+	if len(respList) == 0 {
+		return nil, errors.New("no routing responses to build a route from")
+	}
 	resp, err := buildRouteResponse(respList[0], l)
 	if err != nil {
 		lg.Errorf("failed to build initial route response: %v", err)

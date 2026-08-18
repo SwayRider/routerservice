@@ -37,6 +37,13 @@ func TestParseHosts(t *testing.T) {
 			t.Errorf("de: want pelias-de, got %q", m["de"])
 		}
 	})
+
+	t.Run("missing colon returns error", func(t *testing.T) {
+		_, err := parseHosts([]string{"benelux"})
+		if err == nil {
+			t.Error("want error for malformed host entry, got nil")
+		}
+	})
 }
 
 func TestParsePorts(t *testing.T) {
@@ -77,6 +84,13 @@ func TestParsePorts(t *testing.T) {
 		_, err := parsePorts([]string{"nl:notanumber"})
 		if err == nil {
 			t.Error("want error for invalid port, got nil")
+		}
+	})
+
+	t.Run("missing colon returns error", func(t *testing.T) {
+		_, err := parsePorts([]string{"4100"})
+		if err == nil {
+			t.Error("want error for malformed port entry, got nil")
 		}
 	})
 }

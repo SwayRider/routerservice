@@ -1,6 +1,7 @@
 package valhalla
 
 import (
+	"fmt"
 	"strings"
 	"strconv"
 	"time"
@@ -52,24 +53,29 @@ func parseHosts(hosts []string) (map[string]string, error) {
 			continue
 		}
 		parts := strings.Split(host, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid host entry %q: want format region:host", host)
+		}
 		res[parts[0]] = parts[1]
 	}
 	return res, nil
 }
 
 func parsePorts(ports []string) (map[string]int, error) {
-	var err error
-
 	res := make(map[string]int)
 	for _, port := range ports {
 		if port == "" {
 			continue
 		}
 		parts := strings.Split(port, ":")
-		res[parts[0]], err = strconv.Atoi(parts[1])
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid port entry %q: want format region:port", port)
+		}
+		p, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return nil, err
 		}
+		res[parts[0]] = p
 	}
-	return res, err
+	return res, nil
 }

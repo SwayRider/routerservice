@@ -1,12 +1,20 @@
 package logic
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
+	"time"
 
+	"github.com/paulmach/orb"
 	"github.com/swayrider/grpcclients/regionclient"
 	pbgeo "github.com/swayrider/protos/common_types/geo"
 	routerv1 "github.com/swayrider/protos/router/v1"
+	"github.com/swayrider/routerservice/restclients/valhalla"
 	vhtypes "github.com/swayrider/routerservice/restclients/valhalla/types"
 	log "github.com/swayrider/swlib/logger"
 )
@@ -353,6 +361,34 @@ func TestAppendBorderCrossing_EmptyLocations(t *testing.T) {
 	}
 	if locs[0].LocationKind != nil {
 		t.Errorf("locs[0].LocationKind: want nil (Break), got %v", *locs[0].LocationKind)
+	}
+}
+
+// TestGetRoadType_SparseLocateResponse verifies getRoadType doesn't panic when
+// Valhalla's /locate response contains an edge with no "edge" details object
+// (resp.Edges[0].Edge is a *EdgeDetails with omitempty, so this is legal JSON).
+func TestGetRoadType_SparseLocateResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"edges":[{}]}]`))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("failed to parse test server URL: %v", err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatalf("failed to parse test server port: %v", err)
+	}
+
+	clnt := valhalla.NewClient()
+	clnt.AddRegion("be", u.Hostname(), port)
+
+	got := getRoadType(context.Background(), time.Second, clnt, "be", orb.Point{4.0, 51.0}, false)
+	if got != nil {
+		t.Errorf("getRoadType() = %v, want nil for a sparse locate response", *got)
 	}
 }
 

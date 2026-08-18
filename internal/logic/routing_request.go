@@ -470,7 +470,7 @@ func getRoadType(
 	if err != nil || resp == nil {
 		return nil
 	}
-	if len(resp.Edges) == 0 {
+	if len(resp.Edges) == 0 || resp.Edges[0].Edge == nil {
 		return nil
 	}
 

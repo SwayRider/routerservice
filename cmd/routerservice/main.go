@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -16,7 +15,7 @@ import (
 	"github.com/swayrider/routerservice/internal/server"
 	"github.com/swayrider/routerservice/internal/valhalla"
 	"github.com/swayrider/swlib/app"
-	"github.com/swayrider/swlib/cache"
+	"github.com/swayrider/swlib/jwtkeys"
 	log "github.com/swayrider/swlib/logger"
 )
 
@@ -83,13 +82,9 @@ const (
 	DefValhallaPrefix   = "valhalla-"
 	DefValhallaPostfix  = ""
 	DefValhallaPort     = 8002
-
-	jwtPublicKeys cache.LocalCacheKey = "jwt_public_keys"
 )
 
 func main() {
-	keyChan := make(chan []string)
-
 	stdConfigFields :=
 		app.BackendServiceFields
 
@@ -125,12 +120,15 @@ func main() {
 				FldValhallaRegionPorts, EnvValhallaRegionPorts, "Valhalla region ports", []string{}),
 		).
 		WithConfigFields(app.RateLimitConfigFields()...).
+		WithConfigFields(app.JWTKeysConfigFields()...).
 		WithAppData("PeliasConfig", peliasConfig).
 		WithAppData("ValhallaConfig", valhallaConfig)
 
+	jwtKeyCache := jwtkeys.New(application.Logger())
+
 	grpcConfig := app.NewGrpcConfig(
 		app.AuthInterceptor|app.ClientInfoInterceptor|app.RateLimitInterceptor,
-		getPublicKeys,
+		jwtKeyCache.GetPublicKeys,
 		app.GrpcServiceHooks{
 			ServiceRegistrar:   grpcRouterRegistrar,
 			ServiceHTTPHandler: grpcRouterGateway(application),
@@ -143,11 +141,10 @@ func main() {
 
 	application = application.
 		WithBackgroundRoutines(
-			publicKeyListener(keyChan),
-			publicKeyFetcher(keyChan),
+			app.JWTKeysFetcher(jwtKeyCache),
 			app.RateLimitEvictor(grpcConfig),
 		).
-		WithInitializers(bootstrapFn, app.RateLimiterInitializer(grpcConfig)).
+		WithInitializers(bootstrapFn, app.JWTKeysInitializer(jwtKeyCache), app.RateLimiterInitializer(grpcConfig)).
 		WithGrpc(grpcConfig)
 	application.Run()
 }
@@ -213,42 +210,6 @@ func authServiceClientCtor(a app.App) grpcclients.Client {
 		lg.Fatalf("failed to create authservice client: %v", err)
 	}
 	return clnt
-}
-
-func publicKeyListener(keyChan chan []string) func(app.App) {
-	return func(a app.App) {
-		ctx := a.BackgroundContext()
-		defer a.BackgroundWaitGroup().Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case keys := <-keyChan:
-				cache.LCSet(jwtPublicKeys, keys)
-			}
-		}
-	}
-}
-
-func publicKeyFetcher(keyChan chan []string) func(app.App) {
-	return func(a app.App) {
-		ctx := a.BackgroundContext()
-		defer a.BackgroundWaitGroup().Done()
-		clnt := app.GetServiceClient[*authclient.Client](a, "authservice")
-		authclient.PublicKeyFetcher(ctx, clnt, keyChan)
-	}
-}
-
-func getPublicKeys() ([]string, error) {
-	keysIface, ok := cache.LCGet(jwtPublicKeys)
-	if !ok {
-		return nil, fmt.Errorf("no public keys found")
-	}
-	keys, ok := keysIface.([]string)
-	if !ok {
-		return nil, fmt.Errorf("invalid public keys")
-	}
-	return keys, nil
 }
 
 func grpcRouterRegistrar(r grpc.ServiceRegistrar, a app.App) {

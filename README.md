@@ -16,7 +16,6 @@ The routerservice exposes two server interfaces:
 - **regionservice**: Region lookup and border crossing information
 - **authservice**: JWT public key discovery for request authentication
 - **Valhalla**: Open-source routing engine (one instance per region)
-- **Pelias** (optional): Geocoding service for address resolution
 
 ### Multi-Region Routing
 
@@ -52,16 +51,6 @@ Valhalla instances can be configured with default naming conventions or explicit
 | `VALHALLA_TIMEOUT_SECS` | `-valhalla-timeout-secs` | 30 | Per-call timeout (seconds) for Valhalla `/route` and `/locate` requests |
 
 Default hostname pattern: `{prefix}{region-name}{postfix}:{port}`
-
-### Pelias Configuration
-
-| Environment Variable | CLI Flag | Default | Description |
-| -------------------- | -------- | ------- | ----------- |
-| `PELIAS_PREFIX` | `-pelias-prefix` | pelias- | Hostname prefix for Pelias instances |
-| `PELIAS_API_POSTFIX` | `-pelias-api-postfix` | -api | Hostname postfix for Pelias API |
-| `PELIAS_API_PORT` | `-pelias-api-port` | 3100 | Default Pelias API port |
-| `PELIAS_API_REGION_HOSTS` | `-pelias-api-region-hosts` | | Per-region hosts |
-| `PELIAS_API_REGION_PORTS` | `-pelias-api-region-ports` | | Per-region ports |
 
 ### Service Dependencies
 

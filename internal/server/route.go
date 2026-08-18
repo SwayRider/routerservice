@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net"
 	"strings"
 
@@ -30,6 +32,11 @@ func (s *RouterServer) Route(
 		return nil, status.Error(
 			codes.InvalidArgument, "No locations specified",
 		)
+	}
+
+	if err := validateLocations(req.Locations); err != nil {
+		lg.Debugln(err.Error())
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	// Forward the caller's token to regionservice calls downstream.
@@ -94,6 +101,11 @@ func (s *RouterServer) Route(
 			return nil, grpcStatus(err)
 		}
 
+		if err := tripStatusError(&resp.Trip); err != nil {
+			lg.Debugln(err.Error())
+			return nil, grpcStatus(err)
+		}
+
 		respList = append(respList, resp)
 	}
 
@@ -108,6 +120,36 @@ func (s *RouterServer) Route(
 	lg.Infof("regionAssignment: %v", regionAssignment)
 
 	return routeResponse, err
+}
+
+// validateLocations checks that every entry has a coordinate with finite,
+// in-range lat/lon values. proto3 allows empty/zero-value messages, so a
+// caller can send e.g. {"locations": [null, null]} and nothing downstream
+// otherwise rejects it.
+func validateLocations(locations []*routerv1.RouteLocation) error {
+	for i, loc := range locations {
+		if loc == nil || loc.Location == nil {
+			return fmt.Errorf("location %d: missing coordinate", i)
+		}
+		lat, lon := loc.Location.Lat, loc.Location.Lon
+		if math.IsNaN(lat) || math.IsNaN(lon) || math.IsInf(lat, 0) || math.IsInf(lon, 0) {
+			return fmt.Errorf("location %d: invalid coordinate", i)
+		}
+		if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+			return fmt.Errorf("location %d: coordinate out of range", i)
+		}
+	}
+	return nil
+}
+
+// tripStatusError maps a Valhalla trip with a non-zero status (no route
+// found, etc.) to logic.ErrNoRouteFound, so the caller sees NotFound instead
+// of a 200 response with an unchecked trip.status field.
+func tripStatusError(trip *vhtypes.Trip) error {
+	if trip.Status != 0 {
+		return fmt.Errorf("%w: %s", logic.ErrNoRouteFound, trip.StatusMessage)
+	}
+	return nil
 }
 
 // buildRouteSummary derives the RouteResponse's start/end region from the

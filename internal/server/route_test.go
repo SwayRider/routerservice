@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"math"
 	"net"
 	"testing"
 
@@ -456,6 +457,98 @@ func TestGrpcStatus_NetworkError(t *testing.T) {
 			}
 			if st.Code() != tt.wantCode {
 				t.Errorf("grpcStatus(%T).Code() = %v, want %v", tt.err, st.Code(), tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestValidateLocations(t *testing.T) {
+	valid := &routerv1.RouteLocation{Location: &pbgeo.Coordinate{Lat: 51.0, Lon: 4.0}}
+
+	tests := []struct {
+		name      string
+		locations []*routerv1.RouteLocation
+		wantErr   bool
+	}{
+		{
+			name:      "valid locations",
+			locations: []*routerv1.RouteLocation{valid, valid},
+			wantErr:   false,
+		},
+		{
+			name:      "nil entry",
+			locations: []*routerv1.RouteLocation{nil, valid},
+			wantErr:   true,
+		},
+		{
+			name:      "nil coordinate",
+			locations: []*routerv1.RouteLocation{{Location: nil}, valid},
+			wantErr:   true,
+		},
+		{
+			name: "NaN lat",
+			locations: []*routerv1.RouteLocation{
+				{Location: &pbgeo.Coordinate{Lat: math.NaN(), Lon: 4.0}}, valid,
+			},
+			wantErr: true,
+		},
+		{
+			name: "+Inf lon",
+			locations: []*routerv1.RouteLocation{
+				{Location: &pbgeo.Coordinate{Lat: 51.0, Lon: math.Inf(1)}}, valid,
+			},
+			wantErr: true,
+		},
+		{
+			name: "lat out of range",
+			locations: []*routerv1.RouteLocation{
+				{Location: &pbgeo.Coordinate{Lat: 91.0, Lon: 4.0}}, valid,
+			},
+			wantErr: true,
+		},
+		{
+			name: "lon out of range",
+			locations: []*routerv1.RouteLocation{
+				{Location: &pbgeo.Coordinate{Lat: 51.0, Lon: 181.0}}, valid,
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLocations(tt.locations)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateLocations() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestTripStatusError(t *testing.T) {
+	tests := []struct {
+		name    string
+		trip    *vhtypes.Trip
+		wantErr bool
+	}{
+		{
+			name:    "zero status returns nil",
+			trip:    &vhtypes.Trip{Status: 0},
+			wantErr: false,
+		},
+		{
+			name:    "non-zero status returns ErrNoRouteFound",
+			trip:    &vhtypes.Trip{Status: 1, StatusMessage: "no path could be found"},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tripStatusError(tt.trip)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("tripStatusError() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, logic.ErrNoRouteFound) {
+				t.Errorf("tripStatusError() = %v, want errors.Is(err, logic.ErrNoRouteFound)", err)
 			}
 		})
 	}

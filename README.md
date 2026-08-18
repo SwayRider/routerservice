@@ -49,6 +49,7 @@ Valhalla instances can be configured with default naming conventions or explicit
 | `VALHALLA_PORT` | `-valhalla-port` | 8002 | Default Valhalla port |
 | `VALHALLA_REGION_HOSTS` | `-valhalla-region-hosts` | | Per-region hosts (e.g., "iberian-peninsula:192.168.1.10,west-europe:192.168.1.11") |
 | `VALHALLA_REGION_PORTS` | `-valhalla-region-ports` | | Per-region ports (e.g., "iberian-peninsula:33001,west-europe:33002") |
+| `VALHALLA_TIMEOUT_SECS` | `-valhalla-timeout-secs` | 30 | Per-call timeout (seconds) for Valhalla `/route` and `/locate` requests |
 
 Default hostname pattern: `{prefix}{region-name}{postfix}:{port}`
 

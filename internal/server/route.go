@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"strings"
-	_ "time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -75,7 +74,7 @@ func (s *RouterServer) Route(
 
 		err := routingRequests.AddBorderCrossings(
 			ctx, s.regionClient, token, vhClient,
-			req.Mode, highwayPref, primaryPref, maxPrimary, lg)
+			req.Mode, highwayPref, primaryPref, maxPrimary, s.valhallaConfig.RequestTimeout, lg)
 		if err != nil {
 			return nil, grpcStatus(err)
 		}
@@ -84,10 +83,9 @@ func (s *RouterServer) Route(
 	// TODO: Make use of goroutines
 	respList := make([]*vhtypes.RouteResponse, 0, len(routingRequests))
 	for _, routeReq := range routingRequests {
-		//ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		ctx, cancel := context.WithCancel(context.Background())
-		resp, err := vhClient.Route(ctx, routeReq.Region, routeReq.RequestData)
-		defer cancel()
+		reqCtx, cancel := context.WithTimeout(ctx, s.valhallaConfig.RequestTimeout)
+		resp, err := vhClient.Route(reqCtx, routeReq.Region, routeReq.RequestData)
+		cancel()
 		if err != nil {
 			var netErr net.Error
 			if errors.As(err, &netErr) {

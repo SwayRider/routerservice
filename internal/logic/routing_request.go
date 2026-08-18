@@ -3,7 +3,7 @@ package logic
 import (
 	"context"
 	"fmt"
-	_ "time"
+	"time"
 
 	"github.com/paulmach/orb"
 	"github.com/swayrider/grpcclients/regionclient"
@@ -270,6 +270,7 @@ func (lst *RoutingRequestList) AddBorderCrossings(
 	highwayPreference float64,
 	primaryPreference float64,
 	maxPrimary bool,
+	timeout time.Duration,
 	l *log.Logger,
 ) (err error) {
 	lg := l.Derive(log.WithFunction("addBorderCrossings"))
@@ -305,8 +306,8 @@ func (lst *RoutingRequestList) AddBorderCrossings(
 
 		// RoadTypes of the last location of the first request
 		// and the first location of the second request
-		rt1 := getRoadType(valhallaClnt, region1, pt1, maxPrimary)
-		rt2 := getRoadType(valhallaClnt, region2, pt2, maxPrimary)
+		rt1 := getRoadType(ctx, timeout, valhallaClnt, region1, pt1, maxPrimary)
+		rt2 := getRoadType(ctx, timeout, valhallaClnt, region2, pt2, maxPrimary)
 
 		// Definitions for selecting border crossings based on distance of 
 		// closes point
@@ -438,17 +439,18 @@ func locationKind(
 }
 
 func getRoadType(
+	ctx context.Context,
+	timeout time.Duration,
 	clnt *valhalla.Client,
 	region string,
 	location orb.Point,
 	maxPrimary bool,
 ) *regionclient.RoadType {
 	req := vhtypes.NewLocateRequest(location.Lat(), location.Lon())
-	//ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-
-	resp, err := clnt.Locate(ctx, region, req)
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	resp, err := clnt.Locate(reqCtx, region, req)
 	if err != nil || resp == nil {
 		return nil
 	}

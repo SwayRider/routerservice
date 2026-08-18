@@ -3,6 +3,7 @@ package valhalla
 import (
 	"strings"
 	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -11,6 +12,7 @@ type Config struct {
 	ValhallaPort int
 	ValhallaHosts map[string]string
 	ValhallaPorts map[string]int
+	RequestTimeout time.Duration
 }
 
 func NewConfig() *Config {
@@ -23,10 +25,12 @@ func (c *Config) ParseConfig(
 	valhallaPort int,
 	valhallaHosts []string,
 	valhallaPorts []string,
+	valhallaTimeoutSecs int,
 ) (err error) {
 	c.ValhallaPrefix = valhallaPrefix
 	c.ValhallaPostfix = valhallaPostfis
 	c.ValhallaPort = valhallaPort
+	c.RequestTimeout = time.Duration(valhallaTimeoutSecs) * time.Second
 
 	c.ValhallaHosts, err = parseHosts(valhallaHosts)
 	if err != nil {

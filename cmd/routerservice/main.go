@@ -51,6 +51,7 @@ Environment variables:
 	VALHALLA_PORT
 	VALHALLA_REGION_HOSTS
 	VALHALLA_REGION_PORTS
+	VALHALLA_TIMEOUT_SECS
 */
 
 const (
@@ -64,6 +65,7 @@ const (
 	FldValhallaPort         = "valhalla-port"
 	FldValhallaRegionHosts  = "valhalla-region-hosts"
 	FldValhallaRegionPorts  = "valhalla-region-ports"
+	FldValhallaTimeoutSecs  = "valhalla-timeout-secs"
 
 	EnvPeliasPrefix         = "PELIAS_PREFIX"
 	EnvPeliasApiPostfix     = "PELIAS_API_POSTFIX"
@@ -75,13 +77,15 @@ const (
 	EnvValhallaPort         = "VALHALLA_PORT"
 	EnvValhallaRegionHosts  = "VALHALLA_REGION_HOSTS"
 	EnvValhallaRegionPorts  = "VALHALLA_REGION_PORTS"
+	EnvValhallaTimeoutSecs  = "VALHALLA_TIMEOUT_SECS"
 
-	DefPeliasPrefix     = "pelias-"
-	DefPeliasApiPostfix = "-api"
-	DefPeliasApiPort    = 3100
-	DefValhallaPrefix   = "valhalla-"
-	DefValhallaPostfix  = ""
-	DefValhallaPort     = 8002
+	DefPeliasPrefix       = "pelias-"
+	DefPeliasApiPostfix   = "-api"
+	DefPeliasApiPort      = 3100
+	DefValhallaPrefix     = "valhalla-"
+	DefValhallaPostfix    = ""
+	DefValhallaPort       = 8002
+	DefValhallaTimeoutSecs = 30
 )
 
 func main() {
@@ -118,6 +122,8 @@ func main() {
 				FldValhallaRegionHosts, EnvValhallaRegionHosts, "Valhalla region hosts", []string{}),
 			app.NewStringArrConfigField(
 				FldValhallaRegionPorts, EnvValhallaRegionPorts, "Valhalla region ports", []string{}),
+			app.NewIntConfigField(
+				FldValhallaTimeoutSecs, EnvValhallaTimeoutSecs, "Valhalla request timeout in seconds", DefValhallaTimeoutSecs),
 		).
 		WithConfigFields(app.RateLimitConfigFields()...).
 		WithConfigFields(app.JWTKeysConfigFields()...).
@@ -184,6 +190,7 @@ func bootstrapFn(a app.App) error {
 		app.GetConfigField[int](a.Config(), FldValhallaPort),
 		valhallaRegionHosts,
 		valhallaRegionPorts,
+		app.GetConfigField[int](a.Config(), FldValhallaTimeoutSecs),
 	)
 	if err != nil {
 		return err

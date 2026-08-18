@@ -2,6 +2,7 @@ package valhalla
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseHosts(t *testing.T) {
@@ -89,9 +90,13 @@ func TestParseConfig(t *testing.T) {
 		8002,
 		[]string{"nl:custom-nl-host"},
 		[]string{"nl:9001"},
+		30,
 	)
 	if err != nil {
 		t.Fatalf("ParseConfig error: %v", err)
+	}
+	if c.RequestTimeout != 30*time.Second {
+		t.Errorf("timeout: want 30s, got %v", c.RequestTimeout)
 	}
 	if c.ValhallaPrefix != "valhalla-" {
 		t.Errorf("prefix: want valhalla-, got %q", c.ValhallaPrefix)

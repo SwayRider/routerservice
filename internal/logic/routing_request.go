@@ -162,6 +162,22 @@ func LanguageOption(language string) RoutingRequestOption {
 	}
 }
 
+func ExcludeLocationsOption(locations []vhtypes.Location) RoutingRequestOption {
+	return &routingRequestOptionImpl{
+		fn: func(r *vhtypes.RouteRequest, _ string) {
+			r.ExcludeLocations = locations
+		},
+	}
+}
+
+func ExcludePolygonsOption(polygons [][][]float64) RoutingRequestOption {
+	return &routingRequestOptionImpl{
+		fn: func(r *vhtypes.RouteRequest, _ string) {
+			r.ExcludePolygons = polygons
+		},
+	}
+}
+
 type RoutingRequest struct {
 	Region string
 	RequestData *vhtypes.RouteRequest

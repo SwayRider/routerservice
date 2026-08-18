@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	pbgeo "github.com/swayrider/protos/common_types/geo"
 	routerv1 "github.com/swayrider/protos/router/v1"
 	vhtypes "github.com/swayrider/routerservice/restclients/valhalla/types"
 	"github.com/swayrider/routerservice/internal/logic"
@@ -243,6 +244,98 @@ func TestCreateRequestOptions_UnpavedHandling(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// applyOpts calls createRequestOptions on req and applies the resulting
+// options to a fresh RouteRequest, returning the whole request so top-level
+// (non-costing) fields can be inspected.
+func applyOpts(req *routerv1.RouteRequest) *vhtypes.RouteRequest {
+	s := &RouterServer{}
+	opts := s.createRequestOptions(req)
+	vhReq := &vhtypes.RouteRequest{
+		CostingOptions: vhtypes.CostingOptions{},
+	}
+	for _, opt := range opts {
+		opt.Apply(vhReq, "motorcycle")
+	}
+	return vhReq
+}
+
+func TestCreateRequestOptions_ExcludeLocations(t *testing.T) {
+	req := &routerv1.RouteRequest{
+		Mode:       routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode: routerv1.RoutingResultMode_RRM_MINIMAL,
+		ExcludeLocations: []*routerv1.RouteLocation{
+			{Location: &pbgeo.Coordinate{Lat: 51.0, Lon: 4.0}},
+			nil, // must be skipped without panicking
+			{Location: nil}, // must be skipped without panicking
+			{Location: &pbgeo.Coordinate{Lat: 52.0, Lon: 5.0}},
+		},
+	}
+	got := applyOpts(req).ExcludeLocations
+	if len(got) != 2 {
+		t.Fatalf("want 2 exclude locations, got %d: %v", len(got), got)
+	}
+	if got[0].Lat != 51.0 || got[0].Lon != 4.0 {
+		t.Errorf("got[0]: want (51.0, 4.0), got (%v, %v)", got[0].Lat, got[0].Lon)
+	}
+	if got[1].Lat != 52.0 || got[1].Lon != 5.0 {
+		t.Errorf("got[1]: want (52.0, 5.0), got (%v, %v)", got[1].Lat, got[1].Lon)
+	}
+}
+
+func TestCreateRequestOptions_ExcludeLocations_Empty(t *testing.T) {
+	req := &routerv1.RouteRequest{
+		Mode:       routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode: routerv1.RoutingResultMode_RRM_MINIMAL,
+	}
+	if got := applyOpts(req).ExcludeLocations; got != nil {
+		t.Errorf("want nil ExcludeLocations when unset, got %v", got)
+	}
+}
+
+func TestCreateRequestOptions_ExcludePolygons(t *testing.T) {
+	req := &routerv1.RouteRequest{
+		Mode:       routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode: routerv1.RoutingResultMode_RRM_MINIMAL,
+		ExcludePolygons: []*pbgeo.Polygon{
+			{
+				Points: []*pbgeo.Coordinate{
+					{Lat: 51.0, Lon: 4.0},
+					{Lat: 51.1, Lon: 4.1},
+					{Lat: 51.2, Lon: 4.2},
+				},
+			},
+			nil,                     // must be skipped without panicking
+			{Points: nil},           // must be skipped without panicking
+		},
+	}
+	got := applyOpts(req).ExcludePolygons
+	if len(got) != 1 {
+		t.Fatalf("want 1 exclude polygon, got %d: %v", len(got), got)
+	}
+	ring := got[0]
+	if len(ring) != 3 {
+		t.Fatalf("want 3 ring points, got %d: %v", len(ring), ring)
+	}
+	// Valhalla wants [lon, lat] pairs — the opposite axis order of
+	// pbgeo.Coordinate{Lat, Lon} — so the conversion must swap them.
+	want := [][]float64{{4.0, 51.0}, {4.1, 51.1}, {4.2, 51.2}}
+	for i, pt := range ring {
+		if pt[0] != want[i][0] || pt[1] != want[i][1] {
+			t.Errorf("ring[%d]: want [lon,lat]=%v, got %v", i, want[i], pt)
+		}
+	}
+}
+
+func TestCreateRequestOptions_ExcludePolygons_Empty(t *testing.T) {
+	req := &routerv1.RouteRequest{
+		Mode:       routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode: routerv1.RoutingResultMode_RRM_MINIMAL,
+	}
+	if got := applyOpts(req).ExcludePolygons; got != nil {
+		t.Errorf("want nil ExcludePolygons when unset, got %v", got)
 	}
 }
 

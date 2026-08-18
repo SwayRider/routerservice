@@ -293,6 +293,43 @@ func (s *RouterServer) createRequestOptions(
 		}
 	}
 
+	// Exclude Locations
+	if len(req.ExcludeLocations) > 0 {
+		excludeLocs := make([]vhtypes.Location, 0, len(req.ExcludeLocations))
+		for _, loc := range req.ExcludeLocations {
+			if loc == nil || loc.Location == nil {
+				continue
+			}
+			excludeLocs = append(excludeLocs, *vhtypes.NewLocation(loc.Location.Lat, loc.Location.Lon))
+		}
+		if len(excludeLocs) > 0 {
+			opts = append(opts, logic.ExcludeLocationsOption(excludeLocs))
+		}
+	}
+
+	// Exclude Polygons
+	if len(req.ExcludePolygons) > 0 {
+		excludePolys := make([][][]float64, 0, len(req.ExcludePolygons))
+		for _, poly := range req.ExcludePolygons {
+			if poly == nil || len(poly.Points) == 0 {
+				continue
+			}
+			ring := make([][]float64, 0, len(poly.Points))
+			for _, pt := range poly.Points {
+				if pt == nil {
+					continue
+				}
+				ring = append(ring, []float64{pt.Lon, pt.Lat}) // Valhalla wants [lon, lat]
+			}
+			if len(ring) > 0 {
+				excludePolys = append(excludePolys, ring)
+			}
+		}
+		if len(excludePolys) > 0 {
+			opts = append(opts, logic.ExcludePolygonsOption(excludePolys))
+		}
+	}
+
 	return opts
 }
 

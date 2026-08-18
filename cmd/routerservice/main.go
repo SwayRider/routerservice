@@ -124,16 +124,12 @@ func main() {
 			app.NewStringArrConfigField(
 				FldValhallaRegionPorts, EnvValhallaRegionPorts, "Valhalla region ports", []string{}),
 		).
+		WithConfigFields(app.RateLimitConfigFields()...).
 		WithAppData("PeliasConfig", peliasConfig).
-		WithAppData("ValhallaConfig", valhallaConfig).
-		WithBackgroundRoutines(
-			publicKeyListener(keyChan),
-			publicKeyFetcher(keyChan),
-		).
-		WithInitializers(bootstrapFn)
+		WithAppData("ValhallaConfig", valhallaConfig)
 
 	grpcConfig := app.NewGrpcConfig(
-		app.AuthInterceptor|app.ClientInfoInterceptor,
+		app.AuthInterceptor|app.ClientInfoInterceptor|app.RateLimitInterceptor,
 		getPublicKeys,
 		app.GrpcServiceHooks{
 			ServiceRegistrar:   grpcRouterRegistrar,
@@ -145,7 +141,14 @@ func main() {
 		},
 	)
 
-	application = application.WithGrpc(grpcConfig)
+	application = application.
+		WithBackgroundRoutines(
+			publicKeyListener(keyChan),
+			publicKeyFetcher(keyChan),
+			app.RateLimitEvictor(grpcConfig),
+		).
+		WithInitializers(bootstrapFn, app.RateLimiterInitializer(grpcConfig)).
+		WithGrpc(grpcConfig)
 	application.Run()
 }
 

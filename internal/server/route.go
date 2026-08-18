@@ -42,11 +42,10 @@ func (s *RouterServer) Route(
 	// Forward the caller's token to regionservice calls downstream.
 	token := incomingToken(ctx)
 
-	locationList, regionAssignment, err := s.assignRegionsToLocations(ctx, req, token, lg)
+	_, regionAssignment, err := s.assignRegionsToLocations(ctx, req, token, lg)
 	if err != nil {
 		return nil, grpcStatus(err)
 	}
-	_ = locationList
 
 	opts := s.createRequestOptions(req)
 	routingRequests, err := logic.CreateRoutingRequests(
@@ -116,7 +115,6 @@ func (s *RouterServer) Route(
 	}
 	routeResponse.Summary = buildRouteSummary(regionAssignment)
 
-	//lg.Infof("Route possible: %v", routePossible)
 	lg.Infof("regionAssignment: %v", regionAssignment)
 
 	return routeResponse, err
@@ -556,10 +554,6 @@ func createLocation(
 	if vhLoc.TimeZoneName != nil {
 		loc.TimeZoneName = vhLoc.TimeZoneName
 	}
-	/*if vhLoc.OriginalIndex != nil {
-		tmp := int32(*vhLoc.OriginalIndex)
-		loc.OriginalIndex = &tmp
-	}*/
 
 	if vhLoc.Name != nil {
 		if loc.Info == nil {

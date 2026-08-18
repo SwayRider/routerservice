@@ -102,11 +102,24 @@ func (s *RouterServer) Route(
 		lg.Errorf("failed to build route response: %v", err)
 		return nil, grpcStatus(err)
 	}
+	routeResponse.Summary = buildRouteSummary(regionAssignment)
 
 	//lg.Infof("Route possible: %v", routePossible)
 	lg.Infof("regionAssignment: %v", regionAssignment)
 
 	return routeResponse, err
+}
+
+// buildRouteSummary derives the RouteResponse's start/end region from the
+// already-computed region assignment path.
+func buildRouteSummary(assignments []*logic.RegionAssignment) *routerv1.RouteSummary {
+	if len(assignments) == 0 {
+		return nil
+	}
+	return &routerv1.RouteSummary{
+		StartRegion: assignments[0].Region,
+		EndRegion:   assignments[len(assignments)-1].Region,
+	}
 }
 
 func incomingToken(ctx context.Context) string {

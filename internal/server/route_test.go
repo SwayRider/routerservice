@@ -339,6 +339,43 @@ func TestCreateRequestOptions_ExcludePolygons_Empty(t *testing.T) {
 	}
 }
 
+func TestBuildRouteSummary(t *testing.T) {
+	t.Run("nil for empty assignment list", func(t *testing.T) {
+		if got := buildRouteSummary(nil); got != nil {
+			t.Errorf("want nil, got %v", got)
+		}
+	})
+
+	t.Run("single region: start and end are the same", func(t *testing.T) {
+		got := buildRouteSummary([]*logic.RegionAssignment{
+			{Region: "nl"},
+		})
+		if got == nil {
+			t.Fatal("want non-nil summary")
+		}
+		if got.StartRegion != "nl" || got.EndRegion != "nl" {
+			t.Errorf("want start=nl end=nl, got start=%q end=%q", got.StartRegion, got.EndRegion)
+		}
+	})
+
+	t.Run("multi-region path uses first and last region", func(t *testing.T) {
+		got := buildRouteSummary([]*logic.RegionAssignment{
+			{Region: "nl"},
+			{Region: "be", IsEmpty: true}, // transfer region
+			{Region: "fr"},
+		})
+		if got == nil {
+			t.Fatal("want non-nil summary")
+		}
+		if got.StartRegion != "nl" {
+			t.Errorf("StartRegion: want nl, got %q", got.StartRegion)
+		}
+		if got.EndRegion != "fr" {
+			t.Errorf("EndRegion: want fr, got %q", got.EndRegion)
+		}
+	})
+}
+
 func TestGrpcStatus_Errors(t *testing.T) {
 	tests := []struct {
 		name     string

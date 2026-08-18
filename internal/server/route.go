@@ -255,6 +255,39 @@ func (s *RouterServer) createRequestOptions(
 		// RT_FASTEST, RT_UNSPECIFIED, default: nothing — Valhalla defaults apply
 	}
 
+	// Motorcycle preference fields are convenience dials applied like preset
+	// defaults; explicit route_options.* fields below always take precedence
+	// over them, matching the route_type-preset precedence above.
+	if req.ScenicPreference != nil {
+		sp := float64(*req.ScenicPreference)
+		opts = append(opts,
+			logic.TrailsPreferenceOption(0.5+sp*0.5),
+			logic.FerryPreferenceOption(0.3+sp*0.7),
+			logic.HighwayPreferenceOption(1.0-sp*0.5),
+		)
+	}
+
+	if req.HighwayAvoidance != nil {
+		ha := float64(*req.HighwayAvoidance)
+		opts = append(opts, logic.HighwayPreferenceOption(1.0-ha))
+	}
+
+	if req.TollAvoidance != nil {
+		ta := float64(*req.TollAvoidance)
+		opts = append(opts, logic.TollPreferenceOption(1.0-ta))
+	}
+
+	if req.UnpavedHandling != nil {
+		switch *req.UnpavedHandling {
+		case routerv1.UnpavedHandling_UH_PREFER:
+			opts = append(opts, logic.TracksPreferenceOption(0.9))
+		case routerv1.UnpavedHandling_UH_AVOID:
+			opts = append(opts, logic.ExcludeUnpavedOption(true))
+		}
+	}
+
+	// Explicit route_options.* fields always take precedence over the
+	// route_type preset and the motorcycle preference fields above.
 	if req.RouteOptions != nil {
 		// Highway Preference
 		if req.RouteOptions.HighwayPreference != nil {
@@ -314,35 +347,6 @@ func (s *RouterServer) createRequestOptions(
 		if req.RouteOptions.DistancePreference != nil {
 			opts = append(opts, logic.ShortestDistancePreferenceOption(
 				*req.RouteOptions.DistancePreference))
-		}
-	}
-
-	// Motorcycle preference fields (override route_type presets)
-	if req.ScenicPreference != nil {
-		sp := float64(*req.ScenicPreference)
-		opts = append(opts,
-			logic.TrailsPreferenceOption(0.5+sp*0.5),
-			logic.FerryPreferenceOption(0.3+sp*0.7),
-			logic.HighwayPreferenceOption(1.0-sp*0.5),
-		)
-	}
-
-	if req.HighwayAvoidance != nil {
-		ha := float64(*req.HighwayAvoidance)
-		opts = append(opts, logic.HighwayPreferenceOption(1.0-ha))
-	}
-
-	if req.TollAvoidance != nil {
-		ta := float64(*req.TollAvoidance)
-		opts = append(opts, logic.TollPreferenceOption(1.0-ta))
-	}
-
-	if req.UnpavedHandling != nil {
-		switch *req.UnpavedHandling {
-		case routerv1.UnpavedHandling_UH_PREFER:
-			opts = append(opts, logic.TracksPreferenceOption(0.9))
-		case routerv1.UnpavedHandling_UH_AVOID:
-			opts = append(opts, logic.ExcludeUnpavedOption(true))
 		}
 	}
 

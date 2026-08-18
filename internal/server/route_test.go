@@ -248,6 +248,92 @@ func TestCreateRequestOptions_UnpavedHandling(t *testing.T) {
 	}
 }
 
+func TestCreateRequestOptions_HighwayAvoidanceExplicitRouteOptionsOverride(t *testing.T) {
+	highwayPref := 0.8
+	highwayAvoid := float32(0.9)
+	req := &routerv1.RouteRequest{
+		Mode:             routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode:       routerv1.RoutingResultMode_RRM_MINIMAL,
+		HighwayAvoidance: &highwayAvoid,
+		RouteOptions: &routerv1.RouteOptions{
+			HighwayPreference: &highwayPref,
+		},
+	}
+	got := applyPresets(req)
+	// Explicit route_options.highway_preference=0.8 must win over
+	// highway_avoidance=0.9 (which alone would produce UseHighways=0.1).
+	if got.UseHighways == nil || *got.UseHighways != 0.8 {
+		t.Errorf("override: want UseHighways=0.8, got %v", got.UseHighways)
+	}
+}
+
+func TestCreateRequestOptions_TollAvoidanceExplicitRouteOptionsOverride(t *testing.T) {
+	tollPref := 0.7
+	tollAvoid := float32(0.8)
+	req := &routerv1.RouteRequest{
+		Mode:          routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode:    routerv1.RoutingResultMode_RRM_MINIMAL,
+		TollAvoidance: &tollAvoid,
+		RouteOptions: &routerv1.RouteOptions{
+			TollwayPreference: &tollPref,
+		},
+	}
+	got := applyPresets(req)
+	// Explicit route_options.tollway_preference=0.7 must win over
+	// toll_avoidance=0.8 (which alone would produce UseTolls=0.2).
+	if got.UseTolls == nil || *got.UseTolls != 0.7 {
+		t.Errorf("override: want UseTolls=0.7, got %v", got.UseTolls)
+	}
+}
+
+func TestCreateRequestOptions_UnpavedHandlingExplicitRouteOptionsOverride(t *testing.T) {
+	avoid := routerv1.UnpavedHandling_UH_AVOID
+	excludeUnpaved := false
+	req := &routerv1.RouteRequest{
+		Mode:            routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode:      routerv1.RoutingResultMode_RRM_MINIMAL,
+		UnpavedHandling: &avoid,
+		RouteOptions: &routerv1.RouteOptions{
+			ExcludeUnpaved: &excludeUnpaved,
+		},
+	}
+	got := applyPresets(req)
+	// Explicit route_options.exclude_unpaved=false must win over
+	// unpaved_handling=UH_AVOID (which alone would produce ExcludeUnpaved=true).
+	if got.ExcludeUnpaved == nil || *got.ExcludeUnpaved != false {
+		t.Errorf("override: want ExcludeUnpaved=false, got %v", got.ExcludeUnpaved)
+	}
+}
+
+func TestCreateRequestOptions_ScenicPreferenceExplicitRouteOptionsOverride(t *testing.T) {
+	scenicPref := float32(1.0)
+	trailPref := 0.1
+	ferryPref := 0.0
+	highwayPref := 0.8
+	req := &routerv1.RouteRequest{
+		Mode:             routerv1.RoutingMode_RM_MOTORCYCLE,
+		ResultMode:       routerv1.RoutingResultMode_RRM_MINIMAL,
+		ScenicPreference: &scenicPref,
+		RouteOptions: &routerv1.RouteOptions{
+			TrailPreference:   &trailPref,
+			FerryPreference:   &ferryPref,
+			HighwayPreference: &highwayPref,
+		},
+	}
+	got := applyPresets(req)
+	// scenic_preference=1.0 alone would produce UseTrails=1.0, UseFerry=1.0,
+	// UseHighways=0.5 — all three must instead come from route_options.
+	if got.UseTrails == nil || *got.UseTrails != 0.1 {
+		t.Errorf("override: want UseTrails=0.1, got %v", got.UseTrails)
+	}
+	if got.UseFerry == nil || *got.UseFerry != 0.0 {
+		t.Errorf("override: want UseFerry=0.0, got %v", got.UseFerry)
+	}
+	if got.UseHighways == nil || *got.UseHighways != 0.8 {
+		t.Errorf("override: want UseHighways=0.8, got %v", got.UseHighways)
+	}
+}
+
 // applyOpts calls createRequestOptions on req and applies the resulting
 // options to a fresh RouteRequest, returning the whole request so top-level
 // (non-costing) fields can be inspected.

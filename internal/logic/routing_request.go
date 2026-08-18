@@ -366,12 +366,11 @@ func (lst *RoutingRequestList) AddBorderCrossings(
 
 		// By default select the first crossing result,
 		// unless there is an exact match with the preferred road type
-		selectedBc := &crossings[0]
-		for _, bc := range crossings {
-			if bc.RoadType == preferredRoadType {
-				selectedBc = &bc
-				break
-			}
+		selectedBc, selectErr := selectBorderCrossing(crossings, preferredRoadType)
+		if selectErr != nil {
+			err = selectErr
+			lg.Errorf("Failed to select border crossing: %v", err)
+			return
 		}
 
 		if err = r1.AppendBorderCrossing(selectedBc.Location); err != nil {
@@ -384,6 +383,28 @@ func (lst *RoutingRequestList) AddBorderCrossings(
 		}
 	}
 	return
+}
+
+// selectBorderCrossing picks the crossing matching preferredRoadType, falling
+// back to the first candidate if none match. Returns ErrNoBorderCrossings if
+// crossings is empty — regionservice's FindCrossingLocations can legitimately
+// return an empty slice with a nil error (e.g. no crossing survives the
+// configured road-type/distance filters).
+func selectBorderCrossing(
+	crossings []regionclient.BorderCrossing,
+	preferredRoadType regionclient.RoadType,
+) (*regionclient.BorderCrossing, error) {
+	if len(crossings) == 0 {
+		return nil, ErrNoBorderCrossings
+	}
+	selected := &crossings[0]
+	for _, bc := range crossings {
+		if bc.RoadType == preferredRoadType {
+			selected = &bc
+			break
+		}
+	}
+	return selected, nil
 }
 
 func costingModel(

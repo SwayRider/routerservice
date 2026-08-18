@@ -268,6 +268,11 @@ func TestGrpcStatus_Errors(t *testing.T) {
 			wantCode: codes.NotFound,
 		},
 		{
+			name:     "ErrNoBorderCrossings returns NOT_FOUND",
+			err:      logic.ErrNoBorderCrossings,
+			wantCode: codes.NotFound,
+		},
+		{
 			name:     "unknown error returns INTERNAL",
 			err:      errors.New("some unknown error"),
 			wantCode: codes.Internal,

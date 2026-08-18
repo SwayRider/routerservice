@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/swayrider/grpcclients/regionclient"
@@ -180,6 +181,48 @@ func TestCloseRoadTypeOrder(t *testing.T) {
 		got := closeRoadTypeOrder(nil, nil, false, 0.8, 0.5)
 		if len(got) == 0 || got[0] != regionclient.RT_SECONDARY {
 			t.Errorf("want RT_SECONDARY first, got %v", got)
+		}
+	})
+}
+
+// TestSelectBorderCrossing covers the crossing-selection guard added for code
+// review finding #2 (crossings[0] panicking on an empty slice).
+func TestSelectBorderCrossing(t *testing.T) {
+	t.Run("empty crossings returns ErrNoBorderCrossings", func(t *testing.T) {
+		got, err := selectBorderCrossing(nil, regionclient.RT_MOTORWAY)
+		if got != nil {
+			t.Errorf("want nil result, got %v", got)
+		}
+		if !errors.Is(err, ErrNoBorderCrossings) {
+			t.Errorf("want ErrNoBorderCrossings, got %v", err)
+		}
+	})
+
+	t.Run("exact preferred-road-type match not in position 0 is selected", func(t *testing.T) {
+		crossings := []regionclient.BorderCrossing{
+			{RoadType: regionclient.RT_SECONDARY, Location: regionclient.Coordinate{Latitude: 1, Longitude: 1}},
+			{RoadType: regionclient.RT_MOTORWAY, Location: regionclient.Coordinate{Latitude: 2, Longitude: 2}},
+		}
+		got, err := selectBorderCrossing(crossings, regionclient.RT_MOTORWAY)
+		if err != nil {
+			t.Fatalf("selectBorderCrossing error: %v", err)
+		}
+		if got.RoadType != regionclient.RT_MOTORWAY || got.Location.Latitude != 2 {
+			t.Errorf("want the RT_MOTORWAY entry, got %+v", got)
+		}
+	})
+
+	t.Run("no match falls back to first crossing", func(t *testing.T) {
+		crossings := []regionclient.BorderCrossing{
+			{RoadType: regionclient.RT_SECONDARY, Location: regionclient.Coordinate{Latitude: 1, Longitude: 1}},
+			{RoadType: regionclient.RT_TRUNK, Location: regionclient.Coordinate{Latitude: 2, Longitude: 2}},
+		}
+		got, err := selectBorderCrossing(crossings, regionclient.RT_MOTORWAY)
+		if err != nil {
+			t.Fatalf("selectBorderCrossing error: %v", err)
+		}
+		if got.RoadType != regionclient.RT_SECONDARY || got.Location.Latitude != 1 {
+			t.Errorf("want the first entry, got %+v", got)
 		}
 	})
 }

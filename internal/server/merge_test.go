@@ -300,10 +300,13 @@ func TestMergeShapes(t *testing.T) {
 	})
 
 	t.Run("overlapping endpoint is not duplicated", func(t *testing.T) {
-		// Leg 0: A→B, Leg 1: B→C  (B is shared)
+		// Leg 0: A→B, Leg 1: B'→C, where B' is a few meters from B — the two
+		// legs come from independent Valhalla instances snapping to their own
+		// regional road graphs, so an exact coordinate match is unrealistic.
 		sharedLat, sharedLon := 51.0, 5.0
+		nearbyLat, nearbyLon := 51.00001, 5.0 // ~1.1m north, within tolerance
 		shape0 := encodeShape([]float64{50.0, 4.0, sharedLat, sharedLon})
-		shape1 := encodeShape([]float64{sharedLat, sharedLon, 52.0, 6.0})
+		shape1 := encodeShape([]float64{nearbyLat, nearbyLon, 52.0, 6.0})
 
 		legs := []*routerv1.Leg{
 			{Shape: shape0},
@@ -323,7 +326,37 @@ func TestMergeShapes(t *testing.T) {
 			t.Errorf("want 3 points (overlap deduped), got %d", len(pts)/2)
 		}
 
-		// offsets[1] is set before the overlap strip, so it equals len(leg0 points) = 2
+		// leg1's local point 0 is the shared border point, which already
+		// exists in the merged shape at index 1 (leg0's last point) — so
+		// leg1's maneuver indices must offset by 1, not 2.
+		if offsets[1] != 1 {
+			t.Errorf("offsets[1]: want 1, got %d", offsets[1])
+		}
+	})
+
+	t.Run("overlap not falsely detected beyond tolerance", func(t *testing.T) {
+		// Leg 0 ends and Leg 1 starts ~20m apart — distinct points on the
+		// road, not the same border crossing snapped by two instances.
+		shape0 := encodeShape([]float64{50.0, 4.0, 51.0, 5.0})
+		shape1 := encodeShape([]float64{51.00018, 5.0, 52.0, 6.0}) // ~20m north
+
+		legs := []*routerv1.Leg{
+			{Shape: shape0},
+			{Shape: shape1},
+		}
+		mergedShape, offsets, _, _, err := mergeShapes([]string{shape0, shape1}, legs, false)
+		if err != nil {
+			t.Fatalf("mergeShapes error: %v", err)
+		}
+
+		pts, _, decErr := polylineCodec.DecodeFlatCoords(nil, []byte(mergedShape))
+		if decErr != nil {
+			t.Fatalf("decode error: %v", decErr)
+		}
+		// No dedup expected: 4 distinct points
+		if len(pts)/2 != 4 {
+			t.Errorf("want 4 points (no overlap), got %d", len(pts)/2)
+		}
 		if offsets[1] != 2 {
 			t.Errorf("offsets[1]: want 2, got %d", offsets[1])
 		}

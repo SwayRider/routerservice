@@ -13,6 +13,23 @@ import (
 
 var polylineCodec = polyline.Codec{Dim: 2, Scale: 1e6}
 
+// borderOverlapToleranceMeters is the max distance between two legs' shared
+// border point below which they're treated as the same point. Independent
+// Valhalla instances snap to their own regional road graphs, so the same
+// real-world border point routinely differs by more than a trivial amount
+// between legs.
+const borderOverlapToleranceMeters = 5.0
+
+func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
+	const r = 6371000.0
+	dLat := (lat2 - lat1) * math.Pi / 180
+	dLon := (lon2 - lon1) * math.Pi / 180
+	sinLat := math.Sin(dLat / 2)
+	sinLon := math.Sin(dLon / 2)
+	h := sinLat*sinLat + math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*sinLon*sinLon
+	return 2 * r * math.Atan2(math.Sqrt(h), math.Sqrt(1-h))
+}
+
 // mergeRouteResponse merges legs connected by MergeNext into single legs,
 // producing a response structurally identical to a single Valhalla response.
 func mergeRouteResponse(resp *routerv1.RouteResponse) error {
@@ -146,14 +163,15 @@ func mergeShapes(shapes []string, legs []*routerv1.Leg, hasElevation bool) (
 		if i > 0 && len(flat) >= 2 && len(points) >= 2 {
 			prevLat, prevLon := flat[len(flat)-2], flat[len(flat)-1]
 			curLat, curLon := points[0], points[1]
-			dx := prevLat - curLat
-			dy := prevLon - curLon
-			if math.Sqrt(dx*dx+dy*dy) < 1e-6 {
+			if haversineMeters(prevLat, prevLon, curLat, curLon) < borderOverlapToleranceMeters {
 				overlap = 2
 			}
 		}
 
 		offsets[i] = len(flat) / 2
+		if overlap > 0 {
+			offsets[i]--
+		}
 		flat = append(flat, points[overlap:]...)
 
 		if hasElevation && i > 0 && legs[i].Elevation != nil {

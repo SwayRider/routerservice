@@ -36,6 +36,7 @@ Configuration is provided via environment variables or CLI flags.
 | -------------------- | -------- | ------- | ----------- |
 | `HTTP_PORT` | `-http-port` | 8080 | REST API port |
 | `GRPC_PORT` | `-grpc-port` | 8081 | gRPC port |
+| `LOG_LEVEL` | `-log-level` | info | Log verbosity level |
 
 ### Valhalla Configuration
 
@@ -292,7 +293,7 @@ For cross-region routes, border crossings are selected based on:
 
 ```bash
 # Generate protobuf code (from repo root)
-cd protos && make proto
+cd protos && make
 
 # Build the service
 go build -o routerservice ./cmd/routerservice/main.go
@@ -317,6 +318,19 @@ HTTP_PORT=8082 GRPC_PORT=8083 ./routerservice
 # Build container (from routerservice/ directory)
 make container-build
 ```
+
+### Tagging
+
+Tags are derived from the git state of the checkout:
+
+| Branch / state | Tags applied |
+|----------------|--------------|
+| Version-tagged commit (`v1.2.3`) | `v1.2.3`, `latest` |
+| `main` (untagged) | `v{last}-{date}-dev-b{N}`, `dev-latest` |
+| Other branch | `v{last}-{branch}-b{N}` |
+| Detached HEAD | `v{last}-{sha}-b{N}` |
+
+Non-release builds get an incrementing build number (`-b{N}`) so repeated builds of the same branch don't overwrite each other. The number comes from querying the registry for the highest existing `-b{N}` tag on the same base tag and adding 1; the build fails if the registry can't be reached. Release builds are immutable and never get a build number.
 
 ### FORCE_DEV_LATEST
 

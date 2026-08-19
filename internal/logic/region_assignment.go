@@ -25,7 +25,7 @@ type RegionAssignment struct {
 
 func CalculateRegionAssignment(
 	ctx context.Context,
-	client *regionclient.Client,
+	client regionQuerier,
 	token string,
 	locationList []*pbgeo.Coordinate,
 	l *log.Logger,
@@ -102,7 +102,7 @@ func CalculateRegionAssignment(
 
 func injectTransferRegions(
 	ctx context.Context,
-	client *regionclient.Client,
+	client regionQuerier,
 	token string,
 	assignmentList []*RegionAssignment,
 	corridorPath []string,

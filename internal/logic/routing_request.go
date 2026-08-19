@@ -279,7 +279,7 @@ func CreateRoutingRequests(
 
 func (lst *RoutingRequestList) AddBorderCrossings(
 	ctx context.Context,
-	regionClnt *regionclient.Client,
+	regionClnt regionQuerier,
 	token string,
 	valhallaClnt *valhalla.Client,
 	mode routerv1.RoutingMode,

@@ -22,7 +22,8 @@ func grpcStatus(err error) error {
 	case errors.Is(err, logic.ErrValhallaUnavailable):
 		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, logic.ErrLocationOutsideOfKnownRegions),
-		errors.Is(err, logic.ErrNoRouteFound):
+		errors.Is(err, logic.ErrNoRouteFound),
+		errors.Is(err, logic.ErrNoBorderCrossings):
 		return status.Error(codes.NotFound, err.Error())
 	default:
 		return status.Error(codes.Internal, err.Error())

@@ -2,34 +2,26 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"google.golang.org/grpc"
 	"github.com/swayrider/grpcclients"
 	"github.com/swayrider/grpcclients/authclient"
 	"github.com/swayrider/grpcclients/regionclient"
 	healthv1 "github.com/swayrider/protos/health/v1"
 	routerv1 "github.com/swayrider/protos/router/v1"
-	"github.com/swayrider/routerservice/internal/pelias"
 	"github.com/swayrider/routerservice/internal/server"
 	"github.com/swayrider/routerservice/internal/valhalla"
 	"github.com/swayrider/swlib/app"
-	"github.com/swayrider/swlib/cache"
+	"github.com/swayrider/swlib/jwtkeys"
 	log "github.com/swayrider/swlib/logger"
+	"google.golang.org/grpc"
 )
 
 /*
 flags:
 	-http-port			(default: 8080)
 	-grpc-port			(default: 8081)
-
-	-pelias-prefix		(default: "pelias-")
-	-pelias-api-postfix	(default: "-api")
-	-pelias-api-port	(default: 3100)
-	-pelias-api-region-hosts	(default: ""; e.g. "iberian-peninsula:192.168.1.222,west-europe:192.168.1.222")
-	-pelias-api-region-ports	(default: ""; e.g. "iberian-peninsula:33111,west-eurpe:33121")
 
 	-valhalla-prefix	(Default: "valhalla-")
 	-valhalla-postfix	(default: "")
@@ -41,59 +33,39 @@ Environment variables:
 	HTTP_PORT
 	GRPC_PORT
 
-	PELIAS_PREFIX
-	PELIAS_API_POSTFIX
-	PELIAS_API_PORT
-	PELIAS_API_REGION_HOSTS
-	PELIAS_API_REGION_PORTS
-
 	VALHALLA_PREFIX
 	VALHALLA_POSTFIX
 	VALHALLA_PORT
 	VALHALLA_REGION_HOSTS
 	VALHALLA_REGION_PORTS
+	VALHALLA_TIMEOUT_SECS
 */
 
 const (
-	FldPeliasPrefix         = "pelias-prefix"
-	FldPeliasApiPostfix     = "pelias-api-postfix"
-	FldPeliasApiPort        = "pelias-api-port"
-	FldPeliasApiRegionHosts = "pelias-api-region-hosts"
-	FldPeliasApiRegionPorts = "pelias-api-region-ports"
-	FldValhallaPrefix       = "valhalla-prefix"
-	FldValhallaPostfix      = "valhalla-postfix"
-	FldValhallaPort         = "valhalla-port"
-	FldValhallaRegionHosts  = "valhalla-region-hosts"
-	FldValhallaRegionPorts  = "valhalla-region-ports"
+	FldValhallaPrefix      = "valhalla-prefix"
+	FldValhallaPostfix     = "valhalla-postfix"
+	FldValhallaPort        = "valhalla-port"
+	FldValhallaRegionHosts = "valhalla-region-hosts"
+	FldValhallaRegionPorts = "valhalla-region-ports"
+	FldValhallaTimeoutSecs = "valhalla-timeout-secs"
 
-	EnvPeliasPrefix         = "PELIAS_PREFIX"
-	EnvPeliasApiPostfix     = "PELIAS_API_POSTFIX"
-	EnvPeliasApiPort        = "PELIAS_API_PORT"
-	EnvPeliasApiRegionHosts = "PELIAS_API_REGION_HOSTS"
-	EnvPeliasApiRegionPorts = "PELIAS_API_REGION_PORTS"
-	EnvValhallaPrefix       = "VALHALLA_PREFIX"
-	EnvValhallaPostfix      = "VALHALLA_POSTFIX"
-	EnvValhallaPort         = "VALHALLA_PORT"
-	EnvValhallaRegionHosts  = "VALHALLA_REGION_HOSTS"
-	EnvValhallaRegionPorts  = "VALHALLA_REGION_PORTS"
+	EnvValhallaPrefix      = "VALHALLA_PREFIX"
+	EnvValhallaPostfix     = "VALHALLA_POSTFIX"
+	EnvValhallaPort        = "VALHALLA_PORT"
+	EnvValhallaRegionHosts = "VALHALLA_REGION_HOSTS"
+	EnvValhallaRegionPorts = "VALHALLA_REGION_PORTS"
+	EnvValhallaTimeoutSecs = "VALHALLA_TIMEOUT_SECS"
 
-	DefPeliasPrefix     = "pelias-"
-	DefPeliasApiPostfix = "-api"
-	DefPeliasApiPort    = 3100
-	DefValhallaPrefix   = "valhalla-"
-	DefValhallaPostfix  = ""
-	DefValhallaPort     = 8002
-
-	jwtPublicKeys cache.LocalCacheKey = "jwt_public_keys"
+	DefValhallaPrefix      = "valhalla-"
+	DefValhallaPostfix     = ""
+	DefValhallaPort        = 8002
+	DefValhallaTimeoutSecs = 30
 )
 
 func main() {
-	keyChan := make(chan []string)
-
 	stdConfigFields :=
 		app.BackendServiceFields
 
-	peliasConfig := pelias.NewConfig()
 	valhallaConfig := valhalla.NewConfig()
 
 	application := app.New("routerservice").
@@ -104,16 +76,6 @@ func main() {
 		).
 		WithConfigFields(
 			app.NewStringConfigField(
-				FldPeliasPrefix, EnvPeliasPrefix, "Pelias prefix", DefPeliasPrefix),
-			app.NewStringConfigField(
-				FldPeliasApiPostfix, EnvPeliasApiPostfix, "Pelias api postfix", DefPeliasApiPostfix),
-			app.NewIntConfigField(
-				FldPeliasApiPort, EnvPeliasApiPort, "Pelias api port", DefPeliasApiPort),
-			app.NewStringArrConfigField(
-				FldPeliasApiRegionHosts, EnvPeliasApiRegionHosts, "Pelias api region hosts", []string{}),
-			app.NewStringArrConfigField(
-				FldPeliasApiRegionPorts, EnvPeliasApiRegionPorts, "Pelias api region ports", []string{}),
-			app.NewStringConfigField(
 				FldValhallaPrefix, EnvValhallaPrefix, "Valhalla prefix", DefValhallaPrefix),
 			app.NewStringConfigField(
 				FldValhallaPostfix, EnvValhallaPostfix, "Valhalla postfix", DefValhallaPostfix),
@@ -123,18 +85,18 @@ func main() {
 				FldValhallaRegionHosts, EnvValhallaRegionHosts, "Valhalla region hosts", []string{}),
 			app.NewStringArrConfigField(
 				FldValhallaRegionPorts, EnvValhallaRegionPorts, "Valhalla region ports", []string{}),
+			app.NewIntConfigField(
+				FldValhallaTimeoutSecs, EnvValhallaTimeoutSecs, "Valhalla request timeout in seconds", DefValhallaTimeoutSecs),
 		).
-		WithAppData("PeliasConfig", peliasConfig).
-		WithAppData("ValhallaConfig", valhallaConfig).
-		WithBackgroundRoutines(
-			publicKeyListener(keyChan),
-			publicKeyFetcher(keyChan),
-		).
-		WithInitializers(bootstrapFn)
+		WithConfigFields(app.RateLimitConfigFields()...).
+		WithConfigFields(app.JWTKeysConfigFields()...).
+		WithAppData("ValhallaConfig", valhallaConfig)
+
+	jwtKeyCache := jwtkeys.New(application.Logger())
 
 	grpcConfig := app.NewGrpcConfig(
-		app.AuthInterceptor|app.ClientInfoInterceptor,
-		getPublicKeys,
+		app.AuthInterceptor|app.ClientInfoInterceptor|app.RateLimitInterceptor,
+		jwtKeyCache.GetPublicKeys,
 		app.GrpcServiceHooks{
 			ServiceRegistrar:   grpcRouterRegistrar,
 			ServiceHTTPHandler: grpcRouterGateway(application),
@@ -145,7 +107,13 @@ func main() {
 		},
 	)
 
-	application = application.WithGrpc(grpcConfig)
+	application = application.
+		WithBackgroundRoutines(
+			app.JWTKeysFetcher(jwtKeyCache),
+			app.RateLimitEvictor(grpcConfig),
+		).
+		WithInitializers(bootstrapFn, app.JWTKeysInitializer(jwtKeyCache), app.RateLimiterInitializer(grpcConfig)).
+		WithGrpc(grpcConfig)
 	application.Run()
 }
 
@@ -154,23 +122,6 @@ func bootstrapFn(a app.App) error {
 	lg.Infoln("Bootstrapping service ...")
 
 	var err error
-
-	peliasConfig := app.GetAppData[*pelias.Config](a, "PeliasConfig")
-
-	peliasApiRegionHostsStr := app.GetConfigFieldAsString(a.Config(), FldPeliasApiRegionHosts)
-	peliasApiRegionPortsStr := app.GetConfigFieldAsString(a.Config(), FldPeliasApiRegionPorts)
-	peliasApiRegionHosts := strings.Split(peliasApiRegionHostsStr, ",")
-	peliasApiRegionPorts := strings.Split(peliasApiRegionPortsStr, ",")
-	err = peliasConfig.ParseConfig(
-		app.GetConfigField[string](a.Config(), FldPeliasPrefix),
-		app.GetConfigField[string](a.Config(), FldPeliasApiPostfix),
-		app.GetConfigField[int](a.Config(), FldPeliasApiPort),
-		peliasApiRegionHosts,
-		peliasApiRegionPorts,
-	)
-	if err != nil {
-		return err
-	}
 
 	valhallaConfig := app.GetAppData[*valhalla.Config](a, "ValhallaConfig")
 
@@ -184,6 +135,7 @@ func bootstrapFn(a app.App) error {
 		app.GetConfigField[int](a.Config(), FldValhallaPort),
 		valhallaRegionHosts,
 		valhallaRegionPorts,
+		app.GetConfigField[int](a.Config(), FldValhallaTimeoutSecs),
 	)
 	if err != nil {
 		return err
@@ -212,48 +164,10 @@ func authServiceClientCtor(a app.App) grpcclients.Client {
 	return clnt
 }
 
-func publicKeyListener(keyChan chan []string) func(app.App) {
-	return func(a app.App) {
-		ctx := a.BackgroundContext()
-		defer a.BackgroundWaitGroup().Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case keys := <-keyChan:
-				cache.LCSet(jwtPublicKeys, keys)
-			}
-		}
-	}
-}
-
-func publicKeyFetcher(keyChan chan []string) func(app.App) {
-	return func(a app.App) {
-		ctx := a.BackgroundContext()
-		defer a.BackgroundWaitGroup().Done()
-		clnt := app.GetServiceClient[*authclient.Client](a, "authservice")
-		authclient.PublicKeyFetcher(ctx, clnt, keyChan)
-	}
-}
-
-func getPublicKeys() ([]string, error) {
-	keysIface, ok := cache.LCGet(jwtPublicKeys)
-	if !ok {
-		return nil, fmt.Errorf("no public keys found")
-	}
-	keys, ok := keysIface.([]string)
-	if !ok {
-		return nil, fmt.Errorf("invalid public keys")
-	}
-	return keys, nil
-}
-
 func grpcRouterRegistrar(r grpc.ServiceRegistrar, a app.App) {
-	peliasConfig := app.GetAppData[*pelias.Config](a, "PeliasConfig")
 	valhallaConfig := app.GetAppData[*valhalla.Config](a, "ValhallaConfig")
 	regionClient := app.GetServiceClient[*regionclient.Client](a, "regionservice")
 	srv := server.NewRouterServer(
-		peliasConfig,
 		valhallaConfig,
 		regionClient,
 		a.Logger())
@@ -261,7 +175,9 @@ func grpcRouterRegistrar(r grpc.ServiceRegistrar, a app.App) {
 }
 
 func grpcHealthRegistrar(r grpc.ServiceRegistrar, a app.App) {
-	srv := server.NewHealthServer(a.Logger())
+	valhallaConfig := app.GetAppData[*valhalla.Config](a, "ValhallaConfig")
+	regionClient := app.GetServiceClient[*regionclient.Client](a, "regionservice")
+	srv := server.NewHealthServer(regionClient, valhallaConfig, a.Logger())
 	healthv1.RegisterHealthServiceServer(r, srv)
 }
 

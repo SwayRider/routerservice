@@ -24,12 +24,12 @@ type RouteRequest struct {
 	PrioritizeBidirectional	*bool				`json:"prioritize_bidirectional,omitempty"`
 
 	// A set of locations to exclude or avoid within a route can be specified
-	// using a JSON array of avoid_locations. The avoid_locations have the same
-	// format as the locations list.
-	// At a minimum each avoid location must include latitude and longitude.
-	// The avoid_locations are mapped to the closest road or roads and these
+	// using a JSON array of exclude_locations. The exclude_locations have the
+	// same format as the locations list.
+	// At a minimum each exclude location must include latitude and longitude.
+	// The exclude_locations are mapped to the closest road or roads and these
 	// roads are excluded from the route path computation.
-	ExcludeLocations	[]Location				`json:"avoid_locations,omitempty"`
+	ExcludeLocations	[]Location				`json:"exclude_locations,omitempty"`
 
 	// One or multiple exterior rings of polygons in the form of nested JSON
 	// arrays, e.g. [[[lon1, lat1], [lon2,lat2]],[[lon1,lat1],[lon2,lat2]]].
@@ -38,7 +38,7 @@ type RouteRequest struct {
 	// to use exclude_locations.
 	// Valhalla will close open rings (i.e. copy the first coordinate to the last
 	// position).
-	ExcludePolygons		[][][]float64			`json:"avoid_polygons,omitempty"`
+	ExcludePolygons		[][][]float64			`json:"exclude_polygons,omitempty"`
 
 	// Elevation interval (meters) for requesting elevation along the route.
 	// Valhalla data must have been generated with elevation data.

@@ -1,10 +1,14 @@
 package logic
 
 import (
+	"context"
+	"errors"
 	"math"
 	"testing"
 
+	"github.com/swayrider/grpcclients/regionclient"
 	pbgeo "github.com/swayrider/protos/common_types/geo"
+	log "github.com/swayrider/swlib/logger"
 )
 
 func coord(lat, lon float64) *pbgeo.Coordinate {
@@ -219,4 +223,381 @@ func TestResolveCandList(t *testing.T) {
 			t.Errorf("last element: want DE, got %q", got[2])
 		}
 	})
+}
+
+// TestBuildRegionList_AllInFirstCore verifies the shortcut path where every
+// resolvment overlaps the first location's core region: every element of the
+// returned list should be that first core region, without falling through to
+// resolveCandList.
+func TestBuildRegionList_AllInFirstCore(t *testing.T) {
+	resolveList := []*RegionResolvment{
+		{CoreRegions: []string{"nl"}},
+		{CoreRegions: []string{"be"}, ExtendedRegions: []string{"nl"}},
+		{CoreRegions: []string{"be"}, ExtendedRegions: []string{"nl"}},
+	}
+	got := buildRegionList(resolveList)
+	if len(got) != len(resolveList) {
+		t.Fatalf("want %d elements, got %d", len(resolveList), len(got))
+	}
+	for i, r := range got {
+		if r != "nl" {
+			t.Errorf("got[%d] = %q, want nl", i, r)
+		}
+	}
+}
+
+// TestBuildRegionList_AllInLastCore verifies the symmetric shortcut where
+// every resolvment overlaps the last location's core region.
+func TestBuildRegionList_AllInLastCore(t *testing.T) {
+	resolveList := []*RegionResolvment{
+		{CoreRegions: []string{"nl"}, ExtendedRegions: []string{"fr"}},
+		{CoreRegions: []string{"nl"}, ExtendedRegions: []string{"fr"}},
+		{CoreRegions: []string{"fr"}},
+	}
+	got := buildRegionList(resolveList)
+	if len(got) != len(resolveList) {
+		t.Fatalf("want %d elements, got %d", len(resolveList), len(got))
+	}
+	for i, r := range got {
+		if r != "fr" {
+			t.Errorf("got[%d] = %q, want fr", i, r)
+		}
+	}
+}
+
+// TestBuildRegionList_FallsThroughToResolveCandList verifies a genuine
+// multi-region path (neither shortcut applies) dispatches to resolveCandList
+// and produces the same result as calling it directly on the equivalent
+// candidate list, pinning the dispatch logic rather than just the sub-helper.
+func TestBuildRegionList_FallsThroughToResolveCandList(t *testing.T) {
+	resolveList := []*RegionResolvment{
+		{CoreRegions: []string{"nl"}},
+		{CoreRegions: []string{"be"}},
+		{CoreRegions: []string{"fr"}},
+	}
+	got := buildRegionList(resolveList)
+
+	// None of nl/be/fr overlap, so matchRegions returns nil for every pair and
+	// buildRegionList falls back to each resolvment's own core region.
+	wantCands := []*regionCandidate{
+		{CoreRegion: "nl", ExtendsIntoRegion: ""},
+		{CoreRegion: "be", ExtendsIntoRegion: ""},
+		{CoreRegion: "fr", ExtendsIntoRegion: ""},
+	}
+	want := resolveCandList(wantCands)
+
+	if len(got) != len(want) {
+		t.Fatalf("want %d elements, got %d", len(want), len(got))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestCalculateRegionAssignment_SingleRegionHappyPath verifies that when
+// every location resolves to the same region and the corridor path is a
+// single element, the result is one non-empty assignment spanning all
+// locations.
+func TestCalculateRegionAssignment_SingleRegionHappyPath(t *testing.T) {
+	locations := []*pbgeo.Coordinate{
+		{Lat: 52.3, Lon: 4.9},
+		{Lat: 52.1, Lon: 4.5},
+	}
+	fake := &fakeRegionQuerier{
+		searchPointFn: func(ctx context.Context, token string, location regionclient.Coordinate, includeExtended bool) (regionclient.RegionList, error) {
+			return regionclient.RegionList{CoreRegions: []string{"nl"}}, nil
+		},
+		findRouteRegionPathsFn: func(ctx context.Context, token string, waypoints []regionclient.Coordinate, widthKm float64) ([][]string, error) {
+			return [][]string{{"nl"}}, nil
+		},
+	}
+
+	assignments, possible, err := CalculateRegionAssignment(context.Background(), fake, "tok", locations, log.New())
+	if err != nil {
+		t.Fatalf("CalculateRegionAssignment error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want routePossible=true")
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("want 1 assignment, got %d", len(assignments))
+	}
+	if assignments[0].Region != "nl" || assignments[0].FromIndex != 0 || assignments[0].ToIndex != 1 {
+		t.Errorf("want {nl 0 1}, got %+v", assignments[0])
+	}
+}
+
+// TestCalculateRegionAssignment_MultiRegionHappyPath verifies two locations
+// resolving to different regions produce two ordered assignments.
+func TestCalculateRegionAssignment_MultiRegionHappyPath(t *testing.T) {
+	locations := []*pbgeo.Coordinate{
+		{Lat: 52.3, Lon: 4.9}, // nl
+		{Lat: 48.8, Lon: 2.3}, // fr
+	}
+	fake := &fakeRegionQuerier{
+		searchPointFn: func(ctx context.Context, token string, location regionclient.Coordinate, includeExtended bool) (regionclient.RegionList, error) {
+			if location.Latitude > 50 {
+				return regionclient.RegionList{CoreRegions: []string{"nl"}}, nil
+			}
+			return regionclient.RegionList{CoreRegions: []string{"fr"}}, nil
+		},
+		findRouteRegionPathsFn: func(ctx context.Context, token string, waypoints []regionclient.Coordinate, widthKm float64) ([][]string, error) {
+			return [][]string{{"nl", "fr"}}, nil
+		},
+	}
+
+	assignments, possible, err := CalculateRegionAssignment(context.Background(), fake, "tok", locations, log.New())
+	if err != nil {
+		t.Fatalf("CalculateRegionAssignment error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want routePossible=true")
+	}
+	if len(assignments) != 2 {
+		t.Fatalf("want 2 assignments, got %d", len(assignments))
+	}
+	if assignments[0].Region != "nl" || assignments[1].Region != "fr" {
+		t.Errorf("want [nl fr] in order, got [%s %s]", assignments[0].Region, assignments[1].Region)
+	}
+}
+
+// TestCalculateRegionAssignment_TransferRegionInjected verifies a 3-element
+// corridor path spanning two real assignments results in an injected IsEmpty
+// middle assignment — the region-assignment-side half of the regression for
+// the historical CreateRoutingRequests panic on transfer regions.
+func TestCalculateRegionAssignment_TransferRegionInjected(t *testing.T) {
+	locations := []*pbgeo.Coordinate{
+		{Lat: 52.3, Lon: 4.9}, // nl
+		{Lat: 48.8, Lon: 2.3}, // fr
+	}
+	fake := &fakeRegionQuerier{
+		searchPointFn: func(ctx context.Context, token string, location regionclient.Coordinate, includeExtended bool) (regionclient.RegionList, error) {
+			if location.Latitude > 50 {
+				return regionclient.RegionList{CoreRegions: []string{"nl"}}, nil
+			}
+			return regionclient.RegionList{CoreRegions: []string{"fr"}}, nil
+		},
+		findRouteRegionPathsFn: func(ctx context.Context, token string, waypoints []regionclient.Coordinate, widthKm float64) ([][]string, error) {
+			return [][]string{{"nl", "be", "fr"}}, nil
+		},
+	}
+
+	assignments, possible, err := CalculateRegionAssignment(context.Background(), fake, "tok", locations, log.New())
+	if err != nil {
+		t.Fatalf("CalculateRegionAssignment error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want routePossible=true")
+	}
+	if len(assignments) != 3 {
+		t.Fatalf("want 3 assignments (nl, transfer be, fr), got %d: %+v", len(assignments), assignments)
+	}
+	if assignments[1].Region != "be" || !assignments[1].IsEmpty || assignments[1].FromIndex != -1 || assignments[1].ToIndex != -1 {
+		t.Errorf("want injected transfer assignment {be -1 -1 true}, got %+v", assignments[1])
+	}
+}
+
+// TestCalculateRegionAssignment_ResolveRegionsError verifies a SearchPoint
+// failure propagates through ResolveRegions.
+func TestCalculateRegionAssignment_ResolveRegionsError(t *testing.T) {
+	wantErr := errors.New("search point failed")
+	fake := &fakeRegionQuerier{
+		searchPointFn: func(ctx context.Context, token string, location regionclient.Coordinate, includeExtended bool) (regionclient.RegionList, error) {
+			return regionclient.RegionList{}, wantErr
+		},
+	}
+
+	_, _, err := CalculateRegionAssignment(context.Background(), fake, "tok",
+		[]*pbgeo.Coordinate{{Lat: 1, Lon: 1}}, log.New())
+	if !errors.Is(err, wantErr) {
+		t.Errorf("want %v, got %v", wantErr, err)
+	}
+}
+
+// TestCalculateRegionAssignment_FindRouteRegionPathsError_FallsBackToFindRegionPath
+// verifies the graceful-fallback behavior: when the corridor lookup fails,
+// CalculateRegionAssignment still succeeds via injectTransferRegions's
+// FindRegionPath fallback rather than failing the whole request.
+func TestCalculateRegionAssignment_FindRouteRegionPathsError_FallsBackToFindRegionPath(t *testing.T) {
+	locations := []*pbgeo.Coordinate{
+		{Lat: 52.3, Lon: 4.9}, // nl
+		{Lat: 48.8, Lon: 2.3}, // fr
+	}
+	fake := &fakeRegionQuerier{
+		searchPointFn: func(ctx context.Context, token string, location regionclient.Coordinate, includeExtended bool) (regionclient.RegionList, error) {
+			if location.Latitude > 50 {
+				return regionclient.RegionList{CoreRegions: []string{"nl"}}, nil
+			}
+			return regionclient.RegionList{CoreRegions: []string{"fr"}}, nil
+		},
+		findRouteRegionPathsFn: func(ctx context.Context, token string, waypoints []regionclient.Coordinate, widthKm float64) ([][]string, error) {
+			return nil, errors.New("valhalla region service unavailable")
+		},
+		findRegionPathFn: func(ctx context.Context, token, fromRegion, toRegion string) ([]string, error) {
+			return []string{fromRegion, toRegion}, nil
+		},
+	}
+
+	assignments, possible, err := CalculateRegionAssignment(context.Background(), fake, "tok", locations, log.New())
+	if err != nil {
+		t.Fatalf("CalculateRegionAssignment error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want routePossible=true despite corridor lookup failure")
+	}
+	if len(assignments) != 2 || assignments[0].Region != "nl" || assignments[1].Region != "fr" {
+		t.Errorf("want [nl fr], got %+v", assignments)
+	}
+}
+
+// TestInjectTransferRegions_NoTransferNeeded verifies a 2-element path
+// injects no transfer regions.
+func TestInjectTransferRegions_NoTransferNeeded(t *testing.T) {
+	assignmentList := []*RegionAssignment{
+		{Region: "nl", FromIndex: 0, ToIndex: 0},
+		{Region: "fr", FromIndex: 1, ToIndex: 1},
+	}
+	fake := &fakeRegionQuerier{
+		findRegionPathFn: func(ctx context.Context, token, fromRegion, toRegion string) ([]string, error) {
+			return []string{fromRegion, toRegion}, nil
+		},
+	}
+
+	got, possible, err := injectTransferRegions(context.Background(), fake, "tok", assignmentList, nil, log.New())
+	if err != nil {
+		t.Fatalf("injectTransferRegions error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want possible=true")
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 assignments (no injection), got %d: %+v", len(got), got)
+	}
+}
+
+// TestInjectTransferRegions_SingleTransferInjected verifies a 3-element path
+// injects exactly one IsEmpty entry between the two real assignments.
+func TestInjectTransferRegions_SingleTransferInjected(t *testing.T) {
+	assignmentList := []*RegionAssignment{
+		{Region: "nl", FromIndex: 0, ToIndex: 0},
+		{Region: "fr", FromIndex: 1, ToIndex: 1},
+	}
+	fake := &fakeRegionQuerier{
+		findRegionPathFn: func(ctx context.Context, token, fromRegion, toRegion string) ([]string, error) {
+			return []string{fromRegion, "be", toRegion}, nil
+		},
+	}
+
+	got, possible, err := injectTransferRegions(context.Background(), fake, "tok", assignmentList, nil, log.New())
+	if err != nil {
+		t.Fatalf("injectTransferRegions error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want possible=true")
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 assignments, got %d: %+v", len(got), got)
+	}
+	if got[1].Region != "be" || !got[1].IsEmpty || got[1].FromIndex != -1 || got[1].ToIndex != -1 {
+		t.Errorf("want injected {be -1 -1 true}, got %+v", got[1])
+	}
+}
+
+// TestInjectTransferRegions_MultipleTransfersInjected verifies a 4+-element
+// path injects multiple ordered IsEmpty entries.
+func TestInjectTransferRegions_MultipleTransfersInjected(t *testing.T) {
+	assignmentList := []*RegionAssignment{
+		{Region: "nl", FromIndex: 0, ToIndex: 0},
+		{Region: "es", FromIndex: 1, ToIndex: 1},
+	}
+	fake := &fakeRegionQuerier{
+		findRegionPathFn: func(ctx context.Context, token, fromRegion, toRegion string) ([]string, error) {
+			return []string{fromRegion, "be", "fr", toRegion}, nil
+		},
+	}
+
+	got, possible, err := injectTransferRegions(context.Background(), fake, "tok", assignmentList, nil, log.New())
+	if err != nil {
+		t.Fatalf("injectTransferRegions error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want possible=true")
+	}
+	if len(got) != 4 {
+		t.Fatalf("want 4 assignments, got %d: %+v", len(got), got)
+	}
+	if got[1].Region != "be" || !got[1].IsEmpty || got[2].Region != "fr" || !got[2].IsEmpty {
+		t.Errorf("want injected [be fr] transfers in order, got %+v", got)
+	}
+}
+
+// TestInjectTransferRegions_EmptyPath_NotPossible verifies an empty path
+// (no route between two regions) sets possible=false with no error.
+func TestInjectTransferRegions_EmptyPath_NotPossible(t *testing.T) {
+	assignmentList := []*RegionAssignment{
+		{Region: "nl", FromIndex: 0, ToIndex: 0},
+		{Region: "fr", FromIndex: 1, ToIndex: 1},
+	}
+	fake := &fakeRegionQuerier{
+		findRegionPathFn: func(ctx context.Context, token, fromRegion, toRegion string) ([]string, error) {
+			return nil, nil
+		},
+	}
+
+	_, possible, err := injectTransferRegions(context.Background(), fake, "tok", assignmentList, nil, log.New())
+	if err != nil {
+		t.Fatalf("injectTransferRegions error: %v", err)
+	}
+	if possible {
+		t.Error("want possible=false")
+	}
+}
+
+// TestInjectTransferRegions_FindRegionPathError verifies a downstream error propagates.
+func TestInjectTransferRegions_FindRegionPathError(t *testing.T) {
+	assignmentList := []*RegionAssignment{
+		{Region: "nl", FromIndex: 0, ToIndex: 0},
+		{Region: "fr", FromIndex: 1, ToIndex: 1},
+	}
+	wantErr := errors.New("path lookup failed")
+	fake := &fakeRegionQuerier{
+		findRegionPathFn: func(ctx context.Context, token, fromRegion, toRegion string) ([]string, error) {
+			return nil, wantErr
+		},
+	}
+
+	_, _, err := injectTransferRegions(context.Background(), fake, "tok", assignmentList, nil, log.New())
+	if !errors.Is(err, wantErr) {
+		t.Errorf("want %v, got %v", wantErr, err)
+	}
+}
+
+// TestInjectTransferRegions_UsesCorridorSubPathWhenAvailable verifies that
+// when the corridor path already contains both regions in order,
+// FindRegionPath is never called.
+func TestInjectTransferRegions_UsesCorridorSubPathWhenAvailable(t *testing.T) {
+	assignmentList := []*RegionAssignment{
+		{Region: "nl", FromIndex: 0, ToIndex: 0},
+		{Region: "fr", FromIndex: 1, ToIndex: 1},
+	}
+	corridorPath := []string{"nl", "be", "fr"}
+	fake := &fakeRegionQuerier{
+		findRegionPathFn: func(ctx context.Context, token, fromRegion, toRegion string) ([]string, error) {
+			t.Fatal("FindRegionPath should not be called when a corridor sub-path is available")
+			return nil, nil
+		},
+	}
+
+	got, possible, err := injectTransferRegions(context.Background(), fake, "tok", assignmentList, corridorPath, log.New())
+	if err != nil {
+		t.Fatalf("injectTransferRegions error: %v", err)
+	}
+	if !possible {
+		t.Fatal("want possible=true")
+	}
+	if len(got) != 3 || got[1].Region != "be" {
+		t.Errorf("want [nl be fr], got %+v", got)
+	}
 }

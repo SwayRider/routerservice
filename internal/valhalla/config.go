@@ -1,8 +1,10 @@
 package valhalla
 
 import (
+	"fmt"
 	"strings"
 	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -11,6 +13,7 @@ type Config struct {
 	ValhallaPort int
 	ValhallaHosts map[string]string
 	ValhallaPorts map[string]int
+	RequestTimeout time.Duration
 }
 
 func NewConfig() *Config {
@@ -23,10 +26,12 @@ func (c *Config) ParseConfig(
 	valhallaPort int,
 	valhallaHosts []string,
 	valhallaPorts []string,
+	valhallaTimeoutSecs int,
 ) (err error) {
 	c.ValhallaPrefix = valhallaPrefix
 	c.ValhallaPostfix = valhallaPostfis
 	c.ValhallaPort = valhallaPort
+	c.RequestTimeout = time.Duration(valhallaTimeoutSecs) * time.Second
 
 	c.ValhallaHosts, err = parseHosts(valhallaHosts)
 	if err != nil {
@@ -48,24 +53,29 @@ func parseHosts(hosts []string) (map[string]string, error) {
 			continue
 		}
 		parts := strings.Split(host, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid host entry %q: want format region:host", host)
+		}
 		res[parts[0]] = parts[1]
 	}
 	return res, nil
 }
 
 func parsePorts(ports []string) (map[string]int, error) {
-	var err error
-
 	res := make(map[string]int)
 	for _, port := range ports {
 		if port == "" {
 			continue
 		}
 		parts := strings.Split(port, ":")
-		res[parts[0]], err = strconv.Atoi(parts[1])
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid port entry %q: want format region:port", port)
+		}
+		p, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return nil, err
 		}
+		res[parts[0]] = p
 	}
-	return res, err
+	return res, nil
 }

@@ -5,9 +5,10 @@ go 1.26.2
 require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/paulmach/orb v0.13.0
-	github.com/swayrider/grpcclients v0.1.4
-	github.com/swayrider/protos v0.1.2
-	github.com/swayrider/swlib v0.1.5
+	github.com/swayrider/grpcclients v0.1.7
+	github.com/swayrider/protos v0.1.4
+	github.com/swayrider/swlib v0.1.8
+	github.com/twpayne/go-polyline v1.1.1
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 )
@@ -33,11 +34,11 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/rs/cors v1.11.1 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/twpayne/go-polyline v1.1.1 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260420184626-e10c466a9529 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 )

@@ -21,7 +21,7 @@ func (r RegionResolvment) Contains(region string) bool {
 
 func ResolveRegions(
 	ctx context.Context,
-	client *regionclient.Client,
+	client regionQuerier,
 	token string,
 	locations []*pbgeo.Coordinate,
 	l *log.Logger,
@@ -46,7 +46,7 @@ func ResolveRegions(
 
 func ResolveRegion(
 	ctx context.Context,
-	client *regionclient.Client,
+	client regionQuerier,
 	token string,
 	location *pbgeo.Coordinate,
 	l *log.Logger,

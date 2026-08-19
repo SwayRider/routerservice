@@ -3,9 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net"
 	"strings"
-	_ "time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -33,14 +34,18 @@ func (s *RouterServer) Route(
 		)
 	}
 
+	if err := validateLocations(req.Locations); err != nil {
+		lg.Debugln(err.Error())
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
 	// Forward the caller's token to regionservice calls downstream.
 	token := incomingToken(ctx)
 
-	locationList, regionAssignment, err := s.assignRegionsToLocations(ctx, req, token, lg)
+	_, regionAssignment, err := s.assignRegionsToLocations(ctx, req, token, lg)
 	if err != nil {
 		return nil, grpcStatus(err)
 	}
-	_ = locationList
 
 	opts := s.createRequestOptions(req)
 	routingRequests, err := logic.CreateRoutingRequests(
@@ -75,7 +80,7 @@ func (s *RouterServer) Route(
 
 		err := routingRequests.AddBorderCrossings(
 			ctx, s.regionClient, token, vhClient,
-			req.Mode, highwayPref, primaryPref, maxPrimary, lg)
+			req.Mode, highwayPref, primaryPref, maxPrimary, s.valhallaConfig.RequestTimeout, lg)
 		if err != nil {
 			return nil, grpcStatus(err)
 		}
@@ -84,15 +89,19 @@ func (s *RouterServer) Route(
 	// TODO: Make use of goroutines
 	respList := make([]*vhtypes.RouteResponse, 0, len(routingRequests))
 	for _, routeReq := range routingRequests {
-		//ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		ctx, cancel := context.WithCancel(context.Background())
-		resp, err := vhClient.Route(ctx, routeReq.Region, routeReq.RequestData)
-		defer cancel()
+		reqCtx, cancel := context.WithTimeout(ctx, s.valhallaConfig.RequestTimeout)
+		resp, err := vhClient.Route(reqCtx, routeReq.Region, routeReq.RequestData)
+		cancel()
 		if err != nil {
 			var netErr net.Error
 			if errors.As(err, &netErr) {
 				return nil, grpcStatus(logic.ErrValhallaUnavailable)
 			}
+			return nil, grpcStatus(err)
+		}
+
+		if err := tripStatusError(&resp.Trip); err != nil {
+			lg.Debugln(err.Error())
 			return nil, grpcStatus(err)
 		}
 
@@ -104,11 +113,53 @@ func (s *RouterServer) Route(
 		lg.Errorf("failed to build route response: %v", err)
 		return nil, grpcStatus(err)
 	}
+	routeResponse.Summary = buildRouteSummary(regionAssignment)
 
-	//lg.Infof("Route possible: %v", routePossible)
-	lg.Infof("regionAssignment: %v", regionAssignment)
+	lg.Debugf("regionAssignment: %v", regionAssignment)
 
 	return routeResponse, err
+}
+
+// validateLocations checks that every entry has a coordinate with finite,
+// in-range lat/lon values. proto3 allows empty/zero-value messages, so a
+// caller can send e.g. {"locations": [null, null]} and nothing downstream
+// otherwise rejects it.
+func validateLocations(locations []*routerv1.RouteLocation) error {
+	for i, loc := range locations {
+		if loc == nil || loc.Location == nil {
+			return fmt.Errorf("location %d: missing coordinate", i)
+		}
+		lat, lon := loc.Location.Lat, loc.Location.Lon
+		if math.IsNaN(lat) || math.IsNaN(lon) || math.IsInf(lat, 0) || math.IsInf(lon, 0) {
+			return fmt.Errorf("location %d: invalid coordinate", i)
+		}
+		if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+			return fmt.Errorf("location %d: coordinate out of range", i)
+		}
+	}
+	return nil
+}
+
+// tripStatusError maps a Valhalla trip with a non-zero status (no route
+// found, etc.) to logic.ErrNoRouteFound, so the caller sees NotFound instead
+// of a 200 response with an unchecked trip.status field.
+func tripStatusError(trip *vhtypes.Trip) error {
+	if trip.Status != 0 {
+		return fmt.Errorf("%w: %s", logic.ErrNoRouteFound, trip.StatusMessage)
+	}
+	return nil
+}
+
+// buildRouteSummary derives the RouteResponse's start/end region from the
+// already-computed region assignment path.
+func buildRouteSummary(assignments []*logic.RegionAssignment) *routerv1.RouteSummary {
+	if len(assignments) == 0 {
+		return nil
+	}
+	return &routerv1.RouteSummary{
+		StartRegion: assignments[0].Region,
+		EndRegion:   assignments[len(assignments)-1].Region,
+	}
 }
 
 func incomingToken(ctx context.Context) string {
@@ -204,6 +255,39 @@ func (s *RouterServer) createRequestOptions(
 		// RT_FASTEST, RT_UNSPECIFIED, default: nothing — Valhalla defaults apply
 	}
 
+	// Motorcycle preference fields are convenience dials applied like preset
+	// defaults; explicit route_options.* fields below always take precedence
+	// over them, matching the route_type-preset precedence above.
+	if req.ScenicPreference != nil {
+		sp := float64(*req.ScenicPreference)
+		opts = append(opts,
+			logic.TrailsPreferenceOption(0.5+sp*0.5),
+			logic.FerryPreferenceOption(0.3+sp*0.7),
+			logic.HighwayPreferenceOption(1.0-sp*0.5),
+		)
+	}
+
+	if req.HighwayAvoidance != nil {
+		ha := float64(*req.HighwayAvoidance)
+		opts = append(opts, logic.HighwayPreferenceOption(1.0-ha))
+	}
+
+	if req.TollAvoidance != nil {
+		ta := float64(*req.TollAvoidance)
+		opts = append(opts, logic.TollPreferenceOption(1.0-ta))
+	}
+
+	if req.UnpavedHandling != nil {
+		switch *req.UnpavedHandling {
+		case routerv1.UnpavedHandling_UH_PREFER:
+			opts = append(opts, logic.TracksPreferenceOption(0.9))
+		case routerv1.UnpavedHandling_UH_AVOID:
+			opts = append(opts, logic.ExcludeUnpavedOption(true))
+		}
+	}
+
+	// Explicit route_options.* fields always take precedence over the
+	// route_type preset and the motorcycle preference fields above.
 	if req.RouteOptions != nil {
 		// Highway Preference
 		if req.RouteOptions.HighwayPreference != nil {
@@ -266,32 +350,40 @@ func (s *RouterServer) createRequestOptions(
 		}
 	}
 
-	// Motorcycle preference fields (override route_type presets)
-	if req.ScenicPreference != nil {
-		sp := float64(*req.ScenicPreference)
-		opts = append(opts,
-			logic.TrailsPreferenceOption(0.5+sp*0.5),
-			logic.FerryPreferenceOption(0.3+sp*0.7),
-			logic.HighwayPreferenceOption(1.0-sp*0.5),
-		)
+	// Exclude Locations
+	if len(req.ExcludeLocations) > 0 {
+		excludeLocs := make([]vhtypes.Location, 0, len(req.ExcludeLocations))
+		for _, loc := range req.ExcludeLocations {
+			if loc == nil || loc.Location == nil {
+				continue
+			}
+			excludeLocs = append(excludeLocs, *vhtypes.NewLocation(loc.Location.Lat, loc.Location.Lon))
+		}
+		if len(excludeLocs) > 0 {
+			opts = append(opts, logic.ExcludeLocationsOption(excludeLocs))
+		}
 	}
 
-	if req.HighwayAvoidance != nil {
-		ha := float64(*req.HighwayAvoidance)
-		opts = append(opts, logic.HighwayPreferenceOption(1.0-ha))
-	}
-
-	if req.TollAvoidance != nil {
-		ta := float64(*req.TollAvoidance)
-		opts = append(opts, logic.TollPreferenceOption(1.0-ta))
-	}
-
-	if req.UnpavedHandling != nil {
-		switch *req.UnpavedHandling {
-		case routerv1.UnpavedHandling_UH_PREFER:
-			opts = append(opts, logic.TracksPreferenceOption(0.9))
-		case routerv1.UnpavedHandling_UH_AVOID:
-			opts = append(opts, logic.ExcludeUnpavedOption(true))
+	// Exclude Polygons
+	if len(req.ExcludePolygons) > 0 {
+		excludePolys := make([][][]float64, 0, len(req.ExcludePolygons))
+		for _, poly := range req.ExcludePolygons {
+			if poly == nil || len(poly.Points) == 0 {
+				continue
+			}
+			ring := make([][]float64, 0, len(poly.Points))
+			for _, pt := range poly.Points {
+				if pt == nil {
+					continue
+				}
+				ring = append(ring, []float64{pt.Lon, pt.Lat}) // Valhalla wants [lon, lat]
+			}
+			if len(ring) > 0 {
+				excludePolys = append(excludePolys, ring)
+			}
+		}
+		if len(excludePolys) > 0 {
+			opts = append(opts, logic.ExcludePolygonsOption(excludePolys))
 		}
 	}
 
@@ -303,6 +395,9 @@ func (s *RouterServer) buildCombinedRouteResponse(
 	l *log.Logger,
 ) (*routerv1.RouteResponse, error) {
 	lg := l.Derive(log.WithFunction("buildCombinedRouteResponse"))
+	if len(respList) == 0 {
+		return nil, errors.New("no routing responses to build a route from")
+	}
 	resp, err := buildRouteResponse(respList[0], l)
 	if err != nil {
 		lg.Errorf("failed to build initial route response: %v", err)
@@ -466,10 +561,6 @@ func createLocation(
 	if vhLoc.TimeZoneName != nil {
 		loc.TimeZoneName = vhLoc.TimeZoneName
 	}
-	/*if vhLoc.OriginalIndex != nil {
-		tmp := int32(*vhLoc.OriginalIndex)
-		loc.OriginalIndex = &tmp
-	}*/
 
 	if vhLoc.Name != nil {
 		if loc.Info == nil {

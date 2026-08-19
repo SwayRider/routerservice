@@ -300,10 +300,13 @@ func TestMergeShapes(t *testing.T) {
 	})
 
 	t.Run("overlapping endpoint is not duplicated", func(t *testing.T) {
-		// Leg 0: A→B, Leg 1: B→C  (B is shared)
+		// Leg 0: A→B, Leg 1: B'→C, where B' is a few meters from B — the two
+		// legs come from independent Valhalla instances snapping to their own
+		// regional road graphs, so an exact coordinate match is unrealistic.
 		sharedLat, sharedLon := 51.0, 5.0
+		nearbyLat, nearbyLon := 51.00001, 5.0 // ~1.1m north, within tolerance
 		shape0 := encodeShape([]float64{50.0, 4.0, sharedLat, sharedLon})
-		shape1 := encodeShape([]float64{sharedLat, sharedLon, 52.0, 6.0})
+		shape1 := encodeShape([]float64{nearbyLat, nearbyLon, 52.0, 6.0})
 
 		legs := []*routerv1.Leg{
 			{Shape: shape0},
@@ -323,7 +326,37 @@ func TestMergeShapes(t *testing.T) {
 			t.Errorf("want 3 points (overlap deduped), got %d", len(pts)/2)
 		}
 
-		// offsets[1] is set before the overlap strip, so it equals len(leg0 points) = 2
+		// leg1's local point 0 is the shared border point, which already
+		// exists in the merged shape at index 1 (leg0's last point) — so
+		// leg1's maneuver indices must offset by 1, not 2.
+		if offsets[1] != 1 {
+			t.Errorf("offsets[1]: want 1, got %d", offsets[1])
+		}
+	})
+
+	t.Run("overlap not falsely detected beyond tolerance", func(t *testing.T) {
+		// Leg 0 ends and Leg 1 starts ~20m apart — distinct points on the
+		// road, not the same border crossing snapped by two instances.
+		shape0 := encodeShape([]float64{50.0, 4.0, 51.0, 5.0})
+		shape1 := encodeShape([]float64{51.00018, 5.0, 52.0, 6.0}) // ~20m north
+
+		legs := []*routerv1.Leg{
+			{Shape: shape0},
+			{Shape: shape1},
+		}
+		mergedShape, offsets, _, _, err := mergeShapes([]string{shape0, shape1}, legs, false)
+		if err != nil {
+			t.Fatalf("mergeShapes error: %v", err)
+		}
+
+		pts, _, decErr := polylineCodec.DecodeFlatCoords(nil, []byte(mergedShape))
+		if decErr != nil {
+			t.Fatalf("decode error: %v", decErr)
+		}
+		// No dedup expected: 4 distinct points
+		if len(pts)/2 != 4 {
+			t.Errorf("want 4 points (no overlap), got %d", len(pts)/2)
+		}
 		if offsets[1] != 2 {
 			t.Errorf("offsets[1]: want 2, got %d", offsets[1])
 		}
@@ -353,4 +386,206 @@ func TestMergeShapes(t *testing.T) {
 			t.Errorf("elevation: want [100 200 300], got %v", mergedElev)
 		}
 	})
+}
+
+// simpleLeg builds a minimal Leg with a valid two-point polyline shape and no
+// maneuvers/elevation, suitable as a mergeLegGroup/mergeRouteResponse fixture.
+func simpleLeg(lat1, lon1, lat2, lon2 float64, mergeNext bool) *routerv1.Leg {
+	return &routerv1.Leg{
+		Shape:     encodeShape([]float64{lat1, lon1, lat2, lon2}),
+		Summary:   &routerv1.Summary{Time: 10, Length: 1.0},
+		MergeNext: mergeNext,
+	}
+}
+
+// TestMergeRouteResponse_NilOrNoTripNoop verifies nil response/trip is a no-op.
+func TestMergeRouteResponse_NilOrNoTripNoop(t *testing.T) {
+	if err := mergeRouteResponse(nil); err != nil {
+		t.Errorf("nil response: want nil error, got %v", err)
+	}
+	if err := mergeRouteResponse(&routerv1.RouteResponse{Trip: nil}); err != nil {
+		t.Errorf("nil trip: want nil error, got %v", err)
+	}
+}
+
+// TestMergeRouteResponse_LessThanTwoLegsNoop verifies fewer than 2 legs is a no-op.
+func TestMergeRouteResponse_LessThanTwoLegsNoop(t *testing.T) {
+	leg := simpleLeg(50, 4, 51, 5, false)
+	trip := &routerv1.Trip{Legs: []*routerv1.Leg{leg}}
+	resp := &routerv1.RouteResponse{Trip: trip}
+
+	if err := mergeRouteResponse(resp); err != nil {
+		t.Fatalf("mergeRouteResponse error: %v", err)
+	}
+	if len(trip.Legs) != 1 || trip.Legs[0] != leg {
+		t.Errorf("legs should be unchanged, got %v", trip.Legs)
+	}
+}
+
+// TestMergeRouteResponse_NoMergeGroupsNoop verifies legs with no MergeNext
+// flag are left unchanged.
+func TestMergeRouteResponse_NoMergeGroupsNoop(t *testing.T) {
+	leg0 := simpleLeg(50, 4, 51, 5, false)
+	leg1 := simpleLeg(51, 5, 52, 6, false)
+	trip := &routerv1.Trip{Legs: []*routerv1.Leg{leg0, leg1}}
+	resp := &routerv1.RouteResponse{Trip: trip}
+
+	if err := mergeRouteResponse(resp); err != nil {
+		t.Fatalf("mergeRouteResponse error: %v", err)
+	}
+	if len(trip.Legs) != 2 || trip.Legs[0] != leg0 || trip.Legs[1] != leg1 {
+		t.Errorf("legs should be unchanged, got %v", trip.Legs)
+	}
+}
+
+// TestMergeRouteResponse_SingleGroupMerged verifies a 2-leg group collapses
+// to 1 leg matching mergeLegGroup's own output on the same input.
+func TestMergeRouteResponse_SingleGroupMerged(t *testing.T) {
+	leg0 := simpleLeg(50, 4, 51, 5, true)
+	leg1 := simpleLeg(51, 5, 52, 6, false)
+	// mergeLegGroup mutates/clones its input's maneuvers but the Shape/Summary
+	// values are independent of leg identity, so build a fresh pair to diff against.
+	want, err := mergeLegGroup([]*routerv1.Leg{
+		simpleLeg(50, 4, 51, 5, true), simpleLeg(51, 5, 52, 6, false),
+	})
+	if err != nil {
+		t.Fatalf("mergeLegGroup error: %v", err)
+	}
+
+	trip := &routerv1.Trip{Legs: []*routerv1.Leg{leg0, leg1}}
+	resp := &routerv1.RouteResponse{Trip: trip}
+	if err := mergeRouteResponse(resp); err != nil {
+		t.Fatalf("mergeRouteResponse error: %v", err)
+	}
+
+	if len(trip.Legs) != 1 {
+		t.Fatalf("want 1 merged leg, got %d", len(trip.Legs))
+	}
+	if trip.Legs[0].Shape != want.Shape {
+		t.Errorf("merged shape: want %q, got %q", want.Shape, trip.Legs[0].Shape)
+	}
+}
+
+// TestMergeRouteResponse_MultipleGroupsProcessedInReverseOrder verifies two
+// separate merge groups (legs [0,1] and [3,4], leg 2 standalone) both merge
+// correctly and the reverse-order processing doesn't corrupt earlier-group
+// indices.
+func TestMergeRouteResponse_MultipleGroupsProcessedInReverseOrder(t *testing.T) {
+	leg0 := simpleLeg(50, 4, 51, 5, true)
+	leg1 := simpleLeg(51, 5, 52, 6, false)
+	leg2 := simpleLeg(52, 6, 53, 7, false)
+	leg3 := simpleLeg(53, 7, 54, 8, true)
+	leg4 := simpleLeg(54, 8, 55, 9, false)
+	trip := &routerv1.Trip{Legs: []*routerv1.Leg{leg0, leg1, leg2, leg3, leg4}}
+	resp := &routerv1.RouteResponse{Trip: trip}
+
+	if err := mergeRouteResponse(resp); err != nil {
+		t.Fatalf("mergeRouteResponse error: %v", err)
+	}
+	if len(trip.Legs) != 3 {
+		t.Fatalf("want 3 legs (2 merged pairs + 1 standalone), got %d", len(trip.Legs))
+	}
+	if trip.Legs[1] != leg2 {
+		t.Errorf("middle leg should be the untouched standalone leg2, got %v", trip.Legs[1])
+	}
+	if trip.Legs[0].MergeNext || trip.Legs[2].MergeNext {
+		t.Error("merged legs must have MergeNext cleared")
+	}
+}
+
+// TestMergeRouteResponse_MergeLegGroupError verifies a mergeShapes decode
+// error on one leg in a merge group is wrapped and surfaced.
+func TestMergeRouteResponse_MergeLegGroupError(t *testing.T) {
+	leg0 := simpleLeg(50, 4, 51, 5, true)
+	leg1 := &routerv1.Leg{Shape: "\x00", MergeNext: false} // invalid polyline byte
+	trip := &routerv1.Trip{Legs: []*routerv1.Leg{leg0, leg1}}
+	resp := &routerv1.RouteResponse{Trip: trip}
+
+	err := mergeRouteResponse(resp)
+	if err == nil {
+		t.Fatal("want an error for a malformed shape, got nil")
+	}
+}
+
+// TestMergeLegGroup_SingleLegClearsMergeNext verifies a single-leg group
+// returns that leg unchanged except for MergeNext being reset to false.
+func TestMergeLegGroup_SingleLegClearsMergeNext(t *testing.T) {
+	leg := simpleLeg(50, 4, 51, 5, true)
+	got, err := mergeLegGroup([]*routerv1.Leg{leg})
+	if err != nil {
+		t.Fatalf("mergeLegGroup error: %v", err)
+	}
+	if got != leg {
+		t.Error("want the same leg pointer returned")
+	}
+	if got.MergeNext {
+		t.Error("want MergeNext cleared")
+	}
+}
+
+// TestMergeLegGroup_EmptyGroupError verifies an empty leg group errors.
+func TestMergeLegGroup_EmptyGroupError(t *testing.T) {
+	_, err := mergeLegGroup(nil)
+	if err == nil {
+		t.Fatal("want an error for an empty leg group, got nil")
+	}
+}
+
+// TestMergeLegGroup_OrchestratesSubHelpers verifies the merged leg's fields
+// match independently calling the already-tested leaf helpers on the same
+// input, pinning the orchestration rather than re-testing the helpers.
+func TestMergeLegGroup_OrchestratesSubHelpers(t *testing.T) {
+	leg0 := &routerv1.Leg{
+		Shape: encodeShape([]float64{50, 4, 51, 5}),
+		Maneuvers: []*routerv1.Maneuver{
+			{Type: routerv1.ManeuverType_M_START, BeginShapeIndex: 0, EndShapeIndex: 1, Time: 10, Length: 1.0},
+		},
+		Summary:   &routerv1.Summary{Time: 10, Length: 1.0},
+		MergeNext: true,
+	}
+	leg1 := &routerv1.Leg{
+		Shape: encodeShape([]float64{51, 5, 52, 6}),
+		Maneuvers: []*routerv1.Maneuver{
+			{Type: routerv1.ManeuverType_M_DESTINATION, BeginShapeIndex: 0, EndShapeIndex: 1, Time: 5, Length: 0.5},
+		},
+		Summary: &routerv1.Summary{Time: 5, Length: 0.5},
+	}
+	legs := []*routerv1.Leg{leg0, leg1}
+
+	// Independently compute the expected merge via the leaf helpers, using a
+	// fresh (unmutated) copy of the input.
+	leg0b := &routerv1.Leg{Shape: leg0.Shape, Maneuvers: []*routerv1.Maneuver{
+		{Type: routerv1.ManeuverType_M_START, BeginShapeIndex: 0, EndShapeIndex: 1, Time: 10, Length: 1.0},
+	}, Summary: leg0.Summary}
+	leg1b := &routerv1.Leg{Shape: leg1.Shape, Maneuvers: []*routerv1.Maneuver{
+		{Type: routerv1.ManeuverType_M_DESTINATION, BeginShapeIndex: 0, EndShapeIndex: 1, Time: 5, Length: 0.5},
+	}, Summary: leg1.Summary}
+	wantShape, wantOffsets, _, _, err := mergeShapes(
+		[]string{leg0b.Shape, leg1b.Shape}, []*routerv1.Leg{leg0b, leg1b}, false)
+	if err != nil {
+		t.Fatalf("mergeShapes error: %v", err)
+	}
+	wantManeuvers := flattenManeuvers([]*routerv1.Leg{leg0b, leg1b}, wantOffsets)
+	wantManeuvers = handleBorderManeuvers(wantManeuvers, []*routerv1.Leg{leg0b, leg1b})
+	wantSummary := mergeSummaries([]*routerv1.Summary{leg0b.Summary, leg1b.Summary})
+
+	got, err := mergeLegGroup(legs)
+	if err != nil {
+		t.Fatalf("mergeLegGroup error: %v", err)
+	}
+
+	if got.Shape != wantShape {
+		t.Errorf("Shape: want %q, got %q", wantShape, got.Shape)
+	}
+	if len(got.Maneuvers) != len(wantManeuvers) {
+		t.Fatalf("Maneuvers: want %d, got %d", len(wantManeuvers), len(got.Maneuvers))
+	}
+	for i := range wantManeuvers {
+		if got.Maneuvers[i].Type != wantManeuvers[i].Type {
+			t.Errorf("Maneuvers[%d].Type: want %v, got %v", i, wantManeuvers[i].Type, got.Maneuvers[i].Type)
+		}
+	}
+	if got.Summary.Time != wantSummary.Time || got.Summary.Length != wantSummary.Length {
+		t.Errorf("Summary: want %+v, got %+v", wantSummary, got.Summary)
+	}
 }

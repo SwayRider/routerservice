@@ -16,7 +16,6 @@ The routerservice exposes two server interfaces:
 - **regionservice**: Region lookup and border crossing information
 - **authservice**: JWT public key discovery for request authentication
 - **Valhalla**: Open-source routing engine (one instance per region)
-- **Pelias** (optional): Geocoding service for address resolution
 
 ### Multi-Region Routing
 
@@ -37,6 +36,7 @@ Configuration is provided via environment variables or CLI flags.
 | -------------------- | -------- | ------- | ----------- |
 | `HTTP_PORT` | `-http-port` | 8080 | REST API port |
 | `GRPC_PORT` | `-grpc-port` | 8081 | gRPC port |
+| `LOG_LEVEL` | `-log-level` | info | Log verbosity level |
 
 ### Valhalla Configuration
 
@@ -49,18 +49,9 @@ Valhalla instances can be configured with default naming conventions or explicit
 | `VALHALLA_PORT` | `-valhalla-port` | 8002 | Default Valhalla port |
 | `VALHALLA_REGION_HOSTS` | `-valhalla-region-hosts` | | Per-region hosts (e.g., "iberian-peninsula:192.168.1.10,west-europe:192.168.1.11") |
 | `VALHALLA_REGION_PORTS` | `-valhalla-region-ports` | | Per-region ports (e.g., "iberian-peninsula:33001,west-europe:33002") |
+| `VALHALLA_TIMEOUT_SECS` | `-valhalla-timeout-secs` | 30 | Per-call timeout (seconds) for Valhalla `/route` and `/locate` requests |
 
 Default hostname pattern: `{prefix}{region-name}{postfix}:{port}`
-
-### Pelias Configuration
-
-| Environment Variable | CLI Flag | Default | Description |
-| -------------------- | -------- | ------- | ----------- |
-| `PELIAS_PREFIX` | `-pelias-prefix` | pelias- | Hostname prefix for Pelias instances |
-| `PELIAS_API_POSTFIX` | `-pelias-api-postfix` | -api | Hostname postfix for Pelias API |
-| `PELIAS_API_PORT` | `-pelias-api-port` | 3100 | Default Pelias API port |
-| `PELIAS_API_REGION_HOSTS` | `-pelias-api-region-hosts` | | Per-region hosts |
-| `PELIAS_API_REGION_PORTS` | `-pelias-api-region-ports` | | Per-region ports |
 
 ### Service Dependencies
 
@@ -84,6 +75,7 @@ Requests require JWT authentication via the `Authorization: Bearer <token>` head
 | gRPC endpoint | Access |
 |---|---|
 | `/health.v1.HealthService/Ping` | Public — no token required |
+| `/health.v1.HealthService/Check` | Public — no token required |
 | `/router.v1.RouterService/Route` | User JWT **or** service client token with `routing:execute` scope |
 
 Service clients (e.g. swayrider-api) must obtain a token from authservice using their `clientId` and `clientSecret`, then pass it as `Authorization: Bearer <token>` in the gRPC call metadata.
@@ -97,6 +89,13 @@ Service clients (e.g. swayrider-api) must obtain a token from authservice using 
 Simple health check that returns HTTP 200.
 
 - **Endpoint:** `GET /api/v1/health/ping`
+- **Access:** Public (no authentication required)
+
+#### Check
+
+Dependency-aware health check. Returns `UP` only if regionservice and every explicitly configured Valhalla instance (`-valhalla-region-hosts`/`-valhalla-region-ports`) are reachable; returns `DOWN` if any of them is not.
+
+- **Endpoint:** `GET /api/v1/health`
 - **Access:** Public (no authentication required)
 
 ---
@@ -294,7 +293,7 @@ For cross-region routes, border crossings are selected based on:
 
 ```bash
 # Generate protobuf code (from repo root)
-cd protos && make proto
+cd protos && make
 
 # Build the service
 go build -o routerservice ./cmd/routerservice/main.go
@@ -319,6 +318,19 @@ HTTP_PORT=8082 GRPC_PORT=8083 ./routerservice
 # Build container (from routerservice/ directory)
 make container-build
 ```
+
+### Tagging
+
+Tags are derived from the git state of the checkout:
+
+| Branch / state | Tags applied |
+|----------------|--------------|
+| Version-tagged commit (`v1.2.3`) | `v1.2.3`, `latest` |
+| `main` (untagged) | `v{last}-{date}-dev-b{N}`, `dev-latest` |
+| Other branch | `v{last}-{branch}-b{N}` |
+| Detached HEAD | `v{last}-{sha}-b{N}` |
+
+Non-release builds get an incrementing build number (`-b{N}`) so repeated builds of the same branch don't overwrite each other. The number comes from querying the registry for the highest existing `-b{N}` tag on the same base tag and adding 1; the build fails if the registry can't be reached. Release builds are immutable and never get a build number.
 
 ### FORCE_DEV_LATEST
 

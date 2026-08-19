@@ -2,6 +2,7 @@ package valhalla
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseHosts(t *testing.T) {
@@ -35,6 +36,13 @@ func TestParseHosts(t *testing.T) {
 		}
 		if m["de"] != "valhalla-de" {
 			t.Errorf("de: want valhalla-de, got %q", m["de"])
+		}
+	})
+
+	t.Run("missing colon returns error", func(t *testing.T) {
+		_, err := parseHosts([]string{"benelux"})
+		if err == nil {
+			t.Error("want error for malformed host entry, got nil")
 		}
 	})
 }
@@ -79,6 +87,13 @@ func TestParsePorts(t *testing.T) {
 			t.Error("want error for invalid port, got nil")
 		}
 	})
+
+	t.Run("missing colon returns error", func(t *testing.T) {
+		_, err := parsePorts([]string{"8001"})
+		if err == nil {
+			t.Error("want error for malformed port entry, got nil")
+		}
+	})
 }
 
 func TestParseConfig(t *testing.T) {
@@ -89,9 +104,13 @@ func TestParseConfig(t *testing.T) {
 		8002,
 		[]string{"nl:custom-nl-host"},
 		[]string{"nl:9001"},
+		30,
 	)
 	if err != nil {
 		t.Fatalf("ParseConfig error: %v", err)
+	}
+	if c.RequestTimeout != 30*time.Second {
+		t.Errorf("timeout: want 30s, got %v", c.RequestTimeout)
 	}
 	if c.ValhallaPrefix != "valhalla-" {
 		t.Errorf("prefix: want valhalla-, got %q", c.ValhallaPrefix)

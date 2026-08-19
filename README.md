@@ -74,6 +74,7 @@ Requests require JWT authentication via the `Authorization: Bearer <token>` head
 | gRPC endpoint | Access |
 |---|---|
 | `/health.v1.HealthService/Ping` | Public — no token required |
+| `/health.v1.HealthService/Check` | Public — no token required |
 | `/router.v1.RouterService/Route` | User JWT **or** service client token with `routing:execute` scope |
 
 Service clients (e.g. swayrider-api) must obtain a token from authservice using their `clientId` and `clientSecret`, then pass it as `Authorization: Bearer <token>` in the gRPC call metadata.
@@ -87,6 +88,13 @@ Service clients (e.g. swayrider-api) must obtain a token from authservice using 
 Simple health check that returns HTTP 200.
 
 - **Endpoint:** `GET /api/v1/health/ping`
+- **Access:** Public (no authentication required)
+
+#### Check
+
+Dependency-aware health check. Returns `UP` only if regionservice and every explicitly configured Valhalla instance (`-valhalla-region-hosts`/`-valhalla-region-ports`) are reachable; returns `DOWN` if any of them is not.
+
+- **Endpoint:** `GET /api/v1/health`
 - **Access:** Public (no authentication required)
 
 ---

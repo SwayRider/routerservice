@@ -93,6 +93,37 @@ func (c Client) Locate(
 	return &locateResponses[0], nil
 }
 
+func (c Client) Status(
+	ctx context.Context,
+	region string,
+) error {
+	if !c.HasRegion(region) {
+		return fmt.Errorf("region %s not found", region)
+	}
+
+	rc := c.regionClients[region]
+	url := fmt.Sprintf(
+		"http://%s:%d/status", rc.host, rc.port)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code: %d: %s", resp.StatusCode, body)
+	}
+
+	return nil
+}
+
 func (c Client) Route(
 	ctx context.Context,
 	region string,

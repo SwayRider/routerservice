@@ -175,7 +175,9 @@ func grpcRouterRegistrar(r grpc.ServiceRegistrar, a app.App) {
 }
 
 func grpcHealthRegistrar(r grpc.ServiceRegistrar, a app.App) {
-	srv := server.NewHealthServer(a.Logger())
+	valhallaConfig := app.GetAppData[*valhalla.Config](a, "ValhallaConfig")
+	regionClient := app.GetServiceClient[*regionclient.Client](a, "regionservice")
+	srv := server.NewHealthServer(regionClient, valhallaConfig, a.Logger())
 	healthv1.RegisterHealthServiceServer(r, srv)
 }
 

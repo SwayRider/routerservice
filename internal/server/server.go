@@ -11,6 +11,7 @@ import (
 
 func init() {
 	security.PublicEndpoint("/health.v1.HealthService/Ping")
+	security.PublicEndpoint("/health.v1.HealthService/Check")
 	security.UserOrServiceEndpoint("/router.v1.RouterService/Route", []string{"routing:execute"})
 }
 
@@ -44,15 +45,27 @@ func (s RouterServer) Logger() *log.Logger {
 	return s.l
 }
 
+// regionPinger is the subset of regionclient.Client that Check depends on,
+// narrowed to an interface so it can be substituted with a test double.
+type regionPinger interface {
+	Ping() error
+}
+
 type HealthServer struct {
 	healthv1.UnimplementedHealthServiceServer
-	l *log.Logger
+	regionClient   regionPinger
+	valhallaConfig *valhalla.Config
+	l              *log.Logger
 }
 
 func NewHealthServer(
+	regionClient regionPinger,
+	valhallaConfig *valhalla.Config,
 	l *log.Logger,
 ) *HealthServer {
 	return &HealthServer{
+		regionClient:   regionClient,
+		valhallaConfig: valhallaConfig,
 		l: l.Derive(
 			log.WithComponent("HealthServer"),
 			log.WithFunction("NewHealthServer"),

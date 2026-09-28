@@ -6,3 +6,4 @@ REST/
 rest/
 
 .DS_Store
+__debug*

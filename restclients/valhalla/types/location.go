@@ -49,7 +49,7 @@ type Location struct {
 	// If no type is provided, the type is assumed to be a break.
 	// The types of the first and last locations are ignored and are treated as
 	// breaks.
-	LocationKind		*LocationKind			`json:"location_type,omitempty"`
+	LocationKind		*LocationKind			`json:"type,omitempty"`
 
 	// (optional) Preferred direction of travel for the start from the location.
 	// This can be useful for mobile routing where a vehicle is traveling in a

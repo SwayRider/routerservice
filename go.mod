@@ -5,8 +5,8 @@ go 1.26.2
 require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/paulmach/orb v0.13.0
-	github.com/swayrider/grpcclients v0.1.8
-	github.com/swayrider/protos v0.1.5
+	github.com/swayrider/grpcclients v0.1.9-0.20260928145239-3f7f966b6aaa
+	github.com/swayrider/protos v0.1.6-0.20260928115831-7a63bbd11e37
 	github.com/swayrider/swlib v0.1.10
 	github.com/twpayne/go-polyline v1.1.1
 	google.golang.org/grpc v1.80.0

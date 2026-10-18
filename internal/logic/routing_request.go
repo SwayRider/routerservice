@@ -250,6 +250,14 @@ func CreateRoutingRequests(
 					routeLoc.Location.Lon,
 				)
 				loc.SetKind(locationKind(routeLoc.Type))
+				if routeLoc.PreferredHeading != nil {
+					heading := int(*routeLoc.PreferredHeading)
+					loc.Heading = &heading
+					if routeLoc.HeadingTolerance != nil {
+						tolerance := int(*routeLoc.HeadingTolerance)
+						loc.HeadingTolerance = &tolerance
+					}
+				}
 				req.AddLocation(*loc)
 			}
 		}

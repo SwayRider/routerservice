@@ -55,6 +55,7 @@ type RouterServer struct {
 	routerv1.UnimplementedRouterServiceServer
 	valhallaConfig *valhalla.Config
 	regionClient   regionQuerier
+	rejoin         RejoinConfig
 	l              *log.Logger
 }
 
@@ -66,6 +67,7 @@ func NewRouterServer(
 	return &RouterServer{
 		valhallaConfig: valhallaConfig,
 		regionClient:   regionClient,
+		rejoin:         DefaultRejoinConfig(),
 		l: l.Derive(
 			log.WithComponent("RouterServer"),
 			log.WithFunction("NewRouterServer"),

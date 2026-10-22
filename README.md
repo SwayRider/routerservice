@@ -51,18 +51,14 @@ Valhalla instances can be configured with default naming conventions or explicit
 | `VALHALLA_REGION_PORTS` | `-valhalla-region-ports` | | Per-region ports (e.g., "iberian-peninsula:33001,west-europe:33002") |
 | `VALHALLA_TIMEOUT_SECS` | `-valhalla-timeout-secs` | 30 | Per-call timeout (seconds) for Valhalla `/route` and `/locate` requests |
 
-### Rejoin Configuration
+### Reroute Configuration
 
-Tuning for `Rejoin` (see below):
+Tuning for `Reroute` (see below):
 
 | Environment | Flag | Default | Description |
 |-------------|------|---------|-------------|
-| `REJOIN_UTURN_PENALTY_SECONDS` | `-rejoin-uturn-penalty-seconds` | 90 | Seconds added to the score of a connector that starts with a turn-back |
-| `REJOIN_SLACK_SECONDS` | `-rejoin-slack-seconds` | 120 | A rejoin wins unless it is slower than the fresh route by more than the larger of this and the percentage below |
-| `REJOIN_SLACK_PERCENT` | `-rejoin-slack-percent` | 20 | See above |
-| `REJOIN_MAX_PARALLEL` | `-rejoin-max-parallel` | 6 | Valhalla calls one rejoin request makes at the same time |
-
-Default hostname pattern: `{prefix}{region-name}{postfix}:{port}`
+| `REROUTE_MAX_EXTRA_SECONDS` | `-reroute-max-extra-seconds` | 300 | How much slower (seconds) a reroute that keeps the rider's direction of travel and/or avoids the excluded areas may be than the best route without those, and still be preferred |
+| `REROUTE_MAX_PARALLEL` | `-reroute-max-parallel` | 6 | Valhalla calls one reroute request makes at the same time |
 
 ### Service Dependencies
 
@@ -172,18 +168,16 @@ Response:
 }
 ```
 
-#### Rejoin
+#### Reroute
 
-Guides a rider who left a planned route back onto it.
+Calculates a new route for a rider who left the route they were following.
 
-- **Endpoint:** `POST /api/v1/router/rejoin`
+- **Endpoint:** `POST /api/v1/router/reroute`
 - **Access:** Authenticated
 
-The request carries `fresh` (a normal route request: the rider's position as first location with `preferredHeading` and optionally `headingTolerance`, the remaining stops, the options, and any `excludePolygons`) and up to 8 `rejoinPoints` on the original route, each with a `location`, the `heading` of the original route there and the `remainingSeconds` still to travel after it.
+The request is a normal route request (see Route): the rider's position is the first location with `preferredHeading` (their direction of travel, degrees clockwise from north) and optionally `headingTolerance`, followed by the remaining stops; `excludePolygons` hold areas to avoid, e.g. a suspected closure.
 
-For every rejoin point a connector route from the rider is calculated (leaving in the direction of travel, arriving in the direction of the original route), in parallel with the fresh route. A connector that starts with a turn-back (leaves more than 120 degrees away from the heading, or opens with a U-turn) is also calculated without the start heading and scored with the turn-back penalty. The score of a rejoin is connector time + `remainingSeconds` + penalty; the lowest wins (an earlier point wins when within 15 s). It is used unless it is slower than the fresh route by more than the slack (see Rejoin Configuration); then the fresh route is returned.
-
-The response has `kind` (`RJ_REJOIN` or `RJ_FRESH`), `rejoinIndex` (for `RJ_REJOIN`) and `trip` (the connector, or the fresh route).
+Up to four routes are calculated in parallel: with heading and exclusions (**HE**), with exclusions only (**E**), with heading only (**H**) and with neither (**C**, the reference). The answer is the first of HE, E, H that exists and is at most `REROUTE_MAX_EXTRA_SECONDS` slower than C (avoiding a closure matters more than avoiding a turn-back), else C. Without a heading or exclusions it is a plain route. The response is a normal route response.
 
 ### Request Parameters
 

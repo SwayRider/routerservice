@@ -8,11 +8,11 @@ import (
 )
 
 // Every RPC needs an endpoint profile, otherwise the auth interceptor answers
-// "unauthenticated" for it (Rejoin was missing once).
+// "unauthenticated" for it (Rejoin was once missing).
 func TestRouterEndpointsAreRegistered(t *testing.T) {
 	for _, endpoint := range []string{
 		"/router.v1.RouterService/Route",
-		"/router.v1.RouterService/Rejoin",
+		"/router.v1.RouterService/Reroute",
 	} {
 		profile := security.GetEndpointProfile(endpoint)
 		if !profile.AllowUser || !profile.AllowService {

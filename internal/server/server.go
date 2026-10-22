@@ -15,7 +15,7 @@ func init() {
 	security.PublicEndpoint("/health.v1.HealthService/Ping")
 	security.PublicEndpoint("/health.v1.HealthService/Check")
 	security.UserOrServiceEndpoint("/router.v1.RouterService/Route", []string{"routing:execute"})
-	security.UserOrServiceEndpoint("/router.v1.RouterService/Rejoin", []string{"routing:execute"})
+	security.UserOrServiceEndpoint("/router.v1.RouterService/Reroute", []string{"routing:execute"})
 }
 
 // regionQuerier is the subset of regionclient.Client used by RouterServer's
@@ -56,7 +56,7 @@ type RouterServer struct {
 	routerv1.UnimplementedRouterServiceServer
 	valhallaConfig *valhalla.Config
 	regionClient   regionQuerier
-	rejoin         RejoinConfig
+	reroute        RerouteConfig
 	l              *log.Logger
 }
 
@@ -68,7 +68,7 @@ func NewRouterServer(
 	return &RouterServer{
 		valhallaConfig: valhallaConfig,
 		regionClient:   regionClient,
-		rejoin:         DefaultRejoinConfig(),
+		reroute:        DefaultRerouteConfig(),
 		l: l.Derive(
 			log.WithComponent("RouterServer"),
 			log.WithFunction("NewRouterServer"),

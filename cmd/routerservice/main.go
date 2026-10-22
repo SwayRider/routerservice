@@ -40,10 +40,8 @@ Environment variables:
 	VALHALLA_REGION_PORTS
 	VALHALLA_TIMEOUT_SECS
 
-	REJOIN_UTURN_PENALTY_SECONDS	(default: 90)
-	REJOIN_SLACK_SECONDS			(default: 120)
-	REJOIN_SLACK_PERCENT			(default: 20)
-	REJOIN_MAX_PARALLEL				(default: 6)
+	REROUTE_MAX_EXTRA_SECONDS		(default: 300)
+	REROUTE_MAX_PARALLEL			(default: 6)
 */
 
 const (
@@ -61,15 +59,11 @@ const (
 	EnvValhallaRegionPorts = "VALHALLA_REGION_PORTS"
 	EnvValhallaTimeoutSecs = "VALHALLA_TIMEOUT_SECS"
 
-	FldRejoinUTurnPenaltySecs = "rejoin-uturn-penalty-seconds"
-	FldRejoinSlackSecs        = "rejoin-slack-seconds"
-	FldRejoinSlackPercent     = "rejoin-slack-percent"
-	FldRejoinMaxParallel      = "rejoin-max-parallel"
+	FldRerouteMaxExtraSecs = "reroute-max-extra-seconds"
+	FldRerouteMaxParallel  = "reroute-max-parallel"
 
-	EnvRejoinUTurnPenaltySecs = "REJOIN_UTURN_PENALTY_SECONDS"
-	EnvRejoinSlackSecs        = "REJOIN_SLACK_SECONDS"
-	EnvRejoinSlackPercent     = "REJOIN_SLACK_PERCENT"
-	EnvRejoinMaxParallel      = "REJOIN_MAX_PARALLEL"
+	EnvRerouteMaxExtraSecs = "REROUTE_MAX_EXTRA_SECONDS"
+	EnvRerouteMaxParallel  = "REROUTE_MAX_PARALLEL"
 
 	DefValhallaPrefix      = "valhalla-"
 	DefValhallaPostfix     = ""
@@ -105,21 +99,13 @@ func main() {
 		).
 		WithConfigFields(
 			app.NewIntConfigField(
-				FldRejoinUTurnPenaltySecs, EnvRejoinUTurnPenaltySecs,
-				"Seconds added to a rejoin connector that starts with a turn-back",
-				int(server.DefaultRejoinConfig().UTurnPenaltySeconds)),
+				FldRerouteMaxExtraSecs, EnvRerouteMaxExtraSecs,
+				"Seconds a reroute that keeps the rider's direction or avoids a closure may be slower than the best route",
+				int(server.DefaultRerouteConfig().MaxExtraSeconds)),
 			app.NewIntConfigField(
-				FldRejoinSlackSecs, EnvRejoinSlackSecs,
-				"Seconds a rejoin may be slower than a fresh route and still win",
-				int(server.DefaultRejoinConfig().SlackSeconds)),
-			app.NewIntConfigField(
-				FldRejoinSlackPercent, EnvRejoinSlackPercent,
-				"Percent a rejoin may be slower than a fresh route and still win",
-				int(server.DefaultRejoinConfig().SlackPercent)),
-			app.NewIntConfigField(
-				FldRejoinMaxParallel, EnvRejoinMaxParallel,
-				"Valhalla calls a rejoin request makes at the same time",
-				server.DefaultRejoinConfig().MaxParallel),
+				FldRerouteMaxParallel, EnvRerouteMaxParallel,
+				"Valhalla calls a reroute request makes at the same time",
+				server.DefaultRerouteConfig().MaxParallel),
 		).
 		WithConfigFields(app.RateLimitConfigFields()...).
 		WithConfigFields(app.JWTKeysConfigFields()...).
@@ -204,11 +190,9 @@ func grpcRouterRegistrar(r grpc.ServiceRegistrar, a app.App) {
 		valhallaConfig,
 		regionClient,
 		a.Logger())
-	srv.SetRejoinConfig(server.RejoinConfig{
-		UTurnPenaltySeconds: float64(app.GetConfigField[int](a.Config(), FldRejoinUTurnPenaltySecs)),
-		SlackSeconds:        float64(app.GetConfigField[int](a.Config(), FldRejoinSlackSecs)),
-		SlackPercent:        float64(app.GetConfigField[int](a.Config(), FldRejoinSlackPercent)),
-		MaxParallel:         app.GetConfigField[int](a.Config(), FldRejoinMaxParallel),
+	srv.SetRerouteConfig(server.RerouteConfig{
+		MaxExtraSeconds: float64(app.GetConfigField[int](a.Config(), FldRerouteMaxExtraSecs)),
+		MaxParallel:     app.GetConfigField[int](a.Config(), FldRerouteMaxParallel),
 	})
 	routerv1.RegisterRouterServiceServer(r, srv)
 }

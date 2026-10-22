@@ -961,3 +961,36 @@ func TestGetRoadType_ClassificationBranches(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateRoutingRequests_PassesHeadingToValhalla guards the heading and
+// tolerance of a location (used to keep a rejoin from starting with a
+// U-turn): they used to be dropped on the way to Valhalla.
+func TestCreateRoutingRequests_PassesHeadingToValhalla(t *testing.T) {
+	heading, tolerance := int32(90), int32(30)
+	locations := []*routerv1.RouteLocation{
+		{
+			Location:         &pbgeo.Coordinate{Lat: 51.0, Lon: 4.0},
+			PreferredHeading: &heading,
+			HeadingTolerance: &tolerance,
+		},
+		{Location: &pbgeo.Coordinate{Lat: 51.1, Lon: 4.1}},
+	}
+	assignments := []*RegionAssignment{{Region: "be", FromIndex: 0, ToIndex: 1}}
+
+	requestList, err := CreateRoutingRequests(
+		nil, routerv1.RoutingMode_RM_MOTORSCOOTER, locations, assignments, log.New())
+	if err != nil {
+		t.Fatalf("CreateRoutingRequests error: %v", err)
+	}
+
+	got := requestList[0].RequestData.Locations
+	if got[0].Heading == nil || *got[0].Heading != 90 {
+		t.Errorf("start heading: %v", got[0].Heading)
+	}
+	if got[0].HeadingTolerance == nil || *got[0].HeadingTolerance != 30 {
+		t.Errorf("start heading tolerance: %v", got[0].HeadingTolerance)
+	}
+	if got[1].Heading != nil || got[1].HeadingTolerance != nil {
+		t.Errorf("a location without heading must not get one: %v %v", got[1].Heading, got[1].HeadingTolerance)
+	}
+}

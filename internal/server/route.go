@@ -39,9 +39,18 @@ func (s *RouterServer) Route(
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	// Forward the caller's token to regionservice calls downstream.
-	token := incomingToken(ctx)
+	return s.calculateRoute(ctx, req, incomingToken(ctx), lg)
+}
 
+// calculateRoute runs the whole routing pipeline for an already validated
+// request: region assignment, one Valhalla request per region (joined at the
+// border crossings) and the combined response.
+func (s *RouterServer) calculateRoute(
+	ctx context.Context,
+	req *routerv1.RouteRequest,
+	token string,
+	lg *log.Logger,
+) (*routerv1.RouteResponse, error) {
 	_, regionAssignment, err := s.assignRegionsToLocations(ctx, req, token, lg)
 	if err != nil {
 		return nil, grpcStatus(err)

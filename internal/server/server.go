@@ -15,6 +15,7 @@ func init() {
 	security.PublicEndpoint("/health.v1.HealthService/Ping")
 	security.PublicEndpoint("/health.v1.HealthService/Check")
 	security.UserOrServiceEndpoint("/router.v1.RouterService/Route", []string{"routing:execute"})
+	security.UserOrServiceEndpoint("/router.v1.RouterService/Rejoin", []string{"routing:execute"})
 }
 
 // regionQuerier is the subset of regionclient.Client used by RouterServer's

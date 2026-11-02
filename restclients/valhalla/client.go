@@ -168,3 +168,47 @@ func (c Client) Route(
 
 	return &routeResponse, nil
 }
+
+// TraceAttributes matches a shape to the road network and returns the edges
+// and nodes it follows.
+func (c Client) TraceAttributes(
+	ctx context.Context,
+	region string,
+	request *types.TraceAttributesRequest,
+) (*types.TraceAttributesResponse, error) {
+	if !c.HasRegion(region) {
+		return nil, fmt.Errorf("region %s not found", region)
+	}
+
+	rc := c.regionClients[region]
+	url := fmt.Sprintf(
+		"http://%s:%d/trace_attributes", rc.host, rc.port)
+
+	buffer := new(bytes.Buffer)
+	if err := json.NewEncoder(buffer).Encode(request); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, buffer)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d: %s", resp.StatusCode, body)
+	}
+
+	var out types.TraceAttributesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

@@ -114,6 +114,8 @@ func (s *RouterServer) calculateRoute(
 			return nil, grpcStatus(err)
 		}
 
+		addRoundaboutArms(ctx, vhClient, routeReq.Region, s.valhallaConfig.RequestTimeout, resp, lg)
+
 		respList = append(respList, resp)
 	}
 
@@ -880,6 +882,9 @@ func createManeuver(
 		tmp := int32(*vhManeuver.RoundaboutExitCount)
 		maneuver.RoundaboutExitCount = &tmp
 	}
+
+	maneuver.RoundaboutExitAngles = int32s(vhManeuver.RoundaboutExitAngles)
+	maneuver.RoundaboutEntryAngles = int32s(vhManeuver.RoundaboutEntryAngles)
 
 	maneuver.DepartInstruction = vhManeuver.DepartInstruction
 	maneuver.VerbalDepartInstruction = vhManeuver.VerbalDepartInstruction

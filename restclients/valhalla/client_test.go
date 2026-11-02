@@ -243,3 +243,45 @@ func TestRoute_MalformedJSON(t *testing.T) {
 		t.Error("Route() = nil error, want a decode error for malformed JSON")
 	}
 }
+
+func TestTraceAttributes_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/trace_attributes" || r.Method != http.MethodPost {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"edges":[{"roundabout":true,"begin_heading":10,"end_heading":20,` +
+			`"drive_on_right":true,"end_node":{"intersecting_edges":[{"begin_heading":90,"driveability":"forward","road_class":"tertiary"}]}}]}`))
+	}))
+	defer srv.Close()
+
+	clnt := valhalla.NewClient()
+	addTestRegion(t, clnt, "be", srv)
+
+	resp, err := clnt.TraceAttributes(context.Background(), "be", &types.TraceAttributesRequest{})
+	if err != nil {
+		t.Fatalf("TraceAttributes() = %v", err)
+	}
+	if len(resp.Edges) != 1 || !resp.Edges[0].Roundabout || resp.Edges[0].EndNode.IntersectingEdges[0].Driveability != "forward" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestTraceAttributes_NonOKResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	clnt := valhalla.NewClient()
+	addTestRegion(t, clnt, "be", srv)
+
+	if _, err := clnt.TraceAttributes(context.Background(), "be", &types.TraceAttributesRequest{}); err == nil {
+		t.Error("want an error for a non-200 response")
+	}
+}
+
+func TestTraceAttributes_UnknownRegion(t *testing.T) {
+	if _, err := valhalla.NewClient().TraceAttributes(context.Background(), "xx", &types.TraceAttributesRequest{}); err == nil {
+		t.Error("want an error for an unknown region")
+	}
+}

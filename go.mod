@@ -6,7 +6,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/paulmach/orb v0.13.0
 	github.com/swayrider/grpcclients v0.2.1-0.20261022193226-64e54839000d
-	github.com/swayrider/protos v0.2.1-0.20261022184342-1c42b223b738
+	github.com/swayrider/protos v0.2.1-0.20261102151200-4d3295d04d63
 	github.com/swayrider/swlib v0.1.10
 	github.com/twpayne/go-polyline v1.1.1
 	google.golang.org/grpc v1.80.0

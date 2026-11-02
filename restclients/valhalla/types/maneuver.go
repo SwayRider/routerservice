@@ -160,5 +160,12 @@ type Maneuver struct {
 	// An array describing lane-level guidance.
 	// Used when turn_lanes is enabled. See below for details.
 	Lanes								[]TurnLane		`json:"lanes,omitempty"`
+
+	// Arms of a roundabout (see the router's roundabout lookup). Not part of
+	// Valhalla's response: filled in by the router, degrees clockwise from the
+	// direction of entry.
+	RoundaboutExitAngles	[]int	`json:"-"`
+	RoundaboutEntryAngles	[]int	`json:"-"`
 }
+
 

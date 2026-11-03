@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/swayrider/routerservice/internal/logic/logictest"
 	vhtypes "github.com/swayrider/routerservice/restclients/valhalla/types"
 	log "github.com/swayrider/swlib/logger"
 )
@@ -50,10 +51,6 @@ func ringEdge(begin, end int, arms ...vhtypes.TraceIntersectingEdge) vhtypes.Tra
 	return e
 }
 
-func arm(heading int) vhtypes.TraceIntersectingEdge {
-	return vhtypes.TraceIntersectingEdge{BeginHeading: heading, Driveability: "forward", RoadClass: "residential"}
-}
-
 func roadEdge(begin, end int) vhtypes.TraceEdge {
 	return vhtypes.TraceEdge{BeginHeading: begin, EndHeading: end}
 }
@@ -66,19 +63,26 @@ func firstExitTaken() *vhtypes.TraceAttributesResponse {
 	}}
 }
 
-// lapOf is a lap round the same roundabout: east, north and west exits and the
-// road the roundabout was entered from. [east] is the heading of the east exit.
-func lapOf(east int) *vhtypes.TraceAttributesResponse {
-	return &vhtypes.TraceAttributesResponse{Edges: []vhtypes.TraceEdge{
-		roadEdge(0, 0),
-		ringEdge(80, 50, arm(east)),
-		ringEdge(40, 10),
-		ringEdge(0, 330, arm(0)),
-		ringEdge(320, 290),
-		ringEdge(280, 250, arm(270)),
-		ringEdge(240, 210),
-		ringEdge(200, 170, arm(180)),
-	}}
+// lapOf is a lap round the same roundabout, map-matched: east, north and west
+// exits, the first leaving [east] degrees to the outside of the ring (90 is
+// straight out), and the shape the edges point into.
+func lapOf(t *testing.T, east float64) *vhtypes.TraceAttributesResponse {
+	t.Helper()
+	edges, shape := logictest.LapAround(30, false, []logictest.Node{
+		{Travelled: 90, Arms: []logictest.Arm{logictest.ExitArm(east)}},
+		{Travelled: 180, Arms: []logictest.Arm{logictest.ExitArm(90)}},
+		{Travelled: 270, Arms: []logictest.Arm{logictest.ExitArm(90)}},
+		{Travelled: 330},
+	})
+	var flat []float64
+	for _, p := range shape {
+		flat = append(flat, p.Lat, p.Lon)
+	}
+	encoded, err := polylineCodec.EncodeFlatCoords(nil, flat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &vhtypes.TraceAttributesResponse{Shape: string(encoded), Edges: edges}
 }
 
 func answers(route, lap func() *vhtypes.TraceAttributesResponse) func(*vhtypes.TraceAttributesRequest) (*vhtypes.TraceAttributesResponse, error) {
@@ -133,7 +137,7 @@ func run(t *testing.T, tracer *fakeTracer, route *vhtypes.RouteResponse) {
 }
 
 func TestAddRoundaboutArms_AllExitsOfTheRoundabout(t *testing.T) {
-	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(t, 90) })}
 	route := circleRoute(t, 30, 1)
 
 	run(t, tracer, route)
@@ -196,7 +200,7 @@ func TestAddRoundaboutArms_RouteLookupFailureLeavesNoExits(t *testing.T) {
 }
 
 func TestAddRoundaboutArms_DisagreementWithExitCountIsIgnored(t *testing.T) {
-	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(t, 90) })}
 	route := circleRoute(t, 30, 3) // the lookup finds the first exit
 
 	run(t, tracer, route)
@@ -207,8 +211,8 @@ func TestAddRoundaboutArms_DisagreementWithExitCountIsIgnored(t *testing.T) {
 }
 
 func TestAddRoundaboutArms_LapThatIsAnotherRoundaboutIsIgnored(t *testing.T) {
-	// The lap finds the east exit at 150 degrees, not the 90 of the route.
-	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(150) })}
+	// The lap finds the east exit leaving at 50 degrees, not the 90 of the route.
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(t, 50) })}
 	route := circleRoute(t, 30, 1)
 
 	run(t, tracer, route)
@@ -219,7 +223,7 @@ func TestAddRoundaboutArms_LapThatIsAnotherRoundaboutIsIgnored(t *testing.T) {
 }
 
 func TestAddRoundaboutArms_RoundaboutThatIsNotRoundIsNotWalked(t *testing.T) {
-	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(t, 90) })}
 	route := circleRoute(t, 400, 1) // not a roundabout's size
 
 	run(t, tracer, route)
@@ -233,7 +237,7 @@ func TestAddRoundaboutArms_RoundaboutThatIsNotRoundIsNotWalked(t *testing.T) {
 }
 
 func TestAddRoundaboutArms_NoRoundaboutNoLookup(t *testing.T) {
-	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(t, 90) })}
 	route := circleRoute(t, 30, 1)
 	route.Trip.Legs[0].Maneuvers = route.Trip.Legs[0].Maneuvers[:1]
 

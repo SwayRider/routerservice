@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"math"
 	"sort"
 
 	vhtypes "github.com/swayrider/routerservice/restclients/valhalla/types"
@@ -25,11 +26,18 @@ const (
 
 	// A matched lap has to turn at least this far to count as a whole lap.
 	fullLapDegrees = 260
+
+	// After the exit taken, an exit this close to the one before it round the
+	// ring is not a road of its own (a tunnel under the roundabout that meets
+	// the ring, for example).
+	nearbyExitDegrees = 15
 )
 
-// roundaboutArm is a road leaving a roundabout.
+// roundaboutArm is a road leaving a roundabout: the heading it leaves at, and
+// the index of the roundabout edge whose end node it leaves from.
 type roundaboutArm struct {
 	angle int
+	edge  int
 }
 
 // ringEdges finds the roundabout in the edges of a matched shape: the first
@@ -82,15 +90,19 @@ func outerExits(edges []vhtypes.TraceEdge, first, last int) []roundaboutArm {
 			if !outerSide(turnDegrees(e.EndHeading, ie.BeginHeading), path, driveOnRight) {
 				continue
 			}
-			exits = append(exits, roundaboutArm{angle: turnDegrees(entryHeading, ie.BeginHeading)})
+			exits = append(exits, roundaboutArm{angle: turnDegrees(entryHeading, ie.BeginHeading), edge: i})
 		}
 	}
 	return exits
 }
 
-// sortExits puts exits in the order the roundabout is passed.
+// sortExits puts exits in the order the roundabout is passed: by the node they
+// leave from, and by the heading they leave at on the same node.
 func sortExits(arms []roundaboutArm, driveOnRight bool) {
 	sort.SliceStable(arms, func(i, j int) bool {
+		if arms[i].edge != arms[j].edge {
+			return arms[i].edge < arms[j].edge
+		}
 		return armOrderKey(arms[i].angle, driveOnRight) < armOrderKey(arms[j].angle, driveOnRight)
 	})
 }
@@ -120,7 +132,7 @@ func RoundaboutExitsFromEdges(
 	if len(exits)+1 != exitCount {
 		return RoundaboutExits{}, false
 	}
-	taken := roundaboutArm{angle: turnDegrees(entryHeading, edges[last+1].BeginHeading)}
+	taken := roundaboutArm{angle: turnDegrees(entryHeading, edges[last+1].BeginHeading), edge: last}
 	exits = append(exits, taken)
 	sortExits(exits, driveOnRight)
 
@@ -147,13 +159,23 @@ func RoundaboutExitsFromEdges(
 }
 
 // FullRoundaboutExits works out all exits of a roundabout from the edges of a
-// shape that goes once around it, entered from the road before it. [known] are
-// the exits up to the one the route takes (see [RoundaboutExitsFromEdges]):
-// the walk has to find the same ones first, or it is not the same roundabout
-// and nothing should be used. The road the roundabout was entered from is not
-// an exit of the result.
+// shape that goes once around it, entered from the road before it. [shape] is
+// the matched path, which the shape indices of the edges point into. [known]
+// are the exits up to the one the route takes (see [RoundaboutExitsFromEdges]):
+// the walk has to find the same ones first, by the heading they leave at, or
+// it is not the same roundabout and nothing should be used.
+//
+// The angle of an exit is where it is round the ring, not the heading of its
+// lane, which leaves almost along the ring and says little about where the
+// road is: the bearing from the centre of the roundabout to the exit's node,
+// relative to the heading on entry. The road the roundabout was entered from is
+// not an exit of the result. After the exit taken, an exit within
+// [nearbyExitDegrees] of the one before it is left out: it is not a road of
+// its own. Exits up to the one taken are never left out, as Valhalla counts
+// them in the exit it speaks of.
 func FullRoundaboutExits(
 	edges []vhtypes.TraceEdge,
+	shape []vhtypes.ShapePoint,
 	known RoundaboutExits,
 ) (RoundaboutExits, bool) {
 	first, last, ok := ringEdges(edges, false)
@@ -177,26 +199,53 @@ func FullRoundaboutExits(
 		return RoundaboutExits{}, false
 	}
 
+	// The roundabout as a circle, to place the exits on.
+	from, to := edges[first].BeginShapeIndex, edges[last].EndShapeIndex
+	if from < 0 || to < from || to >= len(shape) {
+		return RoundaboutExits{}, false
+	}
+	fit, ok := fitRing(shape[from : to+1])
+	if !ok {
+		return RoundaboutExits{}, false
+	}
+	entryHeading := edges[first-1].EndHeading
+
 	arms := outerExits(edges, first, last)
 	sortExits(arms, driveOnRight)
-	var all []int
+	type exit struct{ heading, position int }
+	var all []exit
 	for _, a := range arms {
-		if headingDistance(a.angle, 180) <= entryRoadDegrees {
+		at := edges[a.edge].EndShapeIndex
+		if at < 0 || at >= len(shape) {
+			return RoundaboutExits{}, false
+		}
+		bearing := int(math.Round(fit.bearingTo(shape[at])))
+		position := turnDegrees(entryHeading, bearing)
+		if headingDistance(position, 180) <= entryRoadDegrees {
 			continue
 		}
-		all = append(all, a.angle)
+		all = append(all, exit{heading: a.angle, position: position})
 	}
 
 	// The exits already known come first, and are the same ones.
 	if len(all) < len(known.Angles) {
 		return RoundaboutExits{}, false
 	}
+	var result RoundaboutExits
 	for i, a := range known.Angles {
-		if headingDistance(all[i], a) > sameExitDegrees {
+		if headingDistance(all[i].heading, a) > sameExitDegrees {
 			return RoundaboutExits{}, false
 		}
+		result.Angles = append(result.Angles, all[i].position)
 	}
-	return RoundaboutExits{Angles: all}, true
+	for _, x := range all[len(known.Angles):] {
+		previous := result.Angles[len(result.Angles)-1]
+		if headingDistance(x.position, previous) <= nearbyExitDegrees {
+			continue
+		}
+		result.Angles = append(result.Angles, x.position)
+	}
+	return result, true
 }
 
 // armOrderKey orders angles in the order a roundabout is passed, starting at

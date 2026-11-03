@@ -6,37 +6,37 @@ import (
 	vhtypes "github.com/swayrider/routerservice/restclients/valhalla/types"
 )
 
-// RoundaboutArms are the roads that meet a roundabout, as angles in degrees
-// (0-359) clockwise from the direction of travel on entry: 0 is straight on,
-// 180 is the road the roundabout was entered from.
-type RoundaboutArms struct {
-	// ExitAngles are the arms that can be driven out of, in the order the
-	// roundabout is passed. The exit taken is among them.
-	ExitAngles []int
-	// EntryAngles are the arms that can only be driven into the roundabout.
-	EntryAngles []int
+// RoundaboutExits are the exits of a roundabout as angles in degrees (0-359)
+// clockwise from the direction of travel on entry: 0 is straight on, 180 is the
+// road the roundabout was entered from. They are in the order the roundabout
+// is passed.
+type RoundaboutExits struct {
+	Angles []int
 }
 
-// pairHeadingDegrees is how far apart the two halves of one two-way road may
-// point, where it is drawn as two one-way roads on neighbouring nodes.
-const pairHeadingDegrees = 60
+const (
+	// An exit that heads the same way as the one seen from the route, within
+	// this many degrees, is the same exit.
+	sameExitDegrees = 10
 
-// RoundaboutArmsFromEdges works out the arms of the roundabout that the edges
-// of a matched shape pass through. The edges must run from the road before
-// the roundabout, through the roundabout, to the road after it.
-//
-// The exits are found with the same rule Valhalla uses to number them: on
-// every roundabout node, each intersecting edge on the outer side of the
-// path (the right where traffic drives on the right) that can be driven out
-// of the roundabout is an exit, plus the exit taken. [exitCount] is Valhalla's
-// own count for the maneuver; when the result disagrees with it, or the exit
-// taken is not at that position, the second result is false and nothing
-// should be used.
-func RoundaboutArmsFromEdges(
-	edges []vhtypes.TraceEdge,
-	exitCount int,
-) (RoundaboutArms, bool) {
-	first, last := -1, -1
+	// The road the roundabout was entered from is not drawn as an exit: it is
+	// the entry stub of the icon. Arms this close to 180 are that road.
+	entryRoadDegrees = 25
+
+	// A matched lap has to turn at least this far to count as a whole lap.
+	fullLapDegrees = 260
+)
+
+// roundaboutArm is a road leaving a roundabout.
+type roundaboutArm struct {
+	angle int
+}
+
+// ringEdges finds the roundabout in the edges of a matched shape: the first
+// run of roundabout edges, with the road before it and, when [needExit] is set,
+// the road after it.
+func ringEdges(edges []vhtypes.TraceEdge, needExit bool) (first, last int, ok bool) {
+	first, last = -1, -1
 	for i, e := range edges {
 		if !e.Roundabout {
 			if first >= 0 {
@@ -49,50 +49,83 @@ func RoundaboutArmsFromEdges(
 		}
 		last = i
 	}
-	if first < 1 || last+1 >= len(edges) {
-		return RoundaboutArms{}, false
+	if first < 1 || (needExit && last+1 >= len(edges)) {
+		return 0, 0, false
 	}
+	return first, last, true
+}
 
+// outerExits returns the exits on the roundabout nodes from edge [first] to
+// edge [last], in no particular order. An exit is an intersecting edge on the
+// outer side of the path (the right where traffic drives on the right) that
+// can be driven out of the roundabout: the rule Valhalla uses to number them.
+// Where there is no edge after the last one, the path is taken to go straight
+// on.
+func outerExits(edges []vhtypes.TraceEdge, first, last int) []roundaboutArm {
 	driveOnRight := edges[first].DriveOnRight == nil || *edges[first].DriveOnRight
 	entryHeading := edges[first-1].EndHeading
 
-	var exits, entries []roundaboutArm
+	var exits []roundaboutArm
 	for i := first; i <= last; i++ {
 		e := edges[i]
 		if e.EndNode == nil {
 			continue
 		}
-		path := turnDegrees(e.EndHeading, edges[i+1].BeginHeading)
+		path := 0
+		if i+1 < len(edges) {
+			path = turnDegrees(e.EndHeading, edges[i+1].BeginHeading)
+		}
 		for _, ie := range e.EndNode.IntersectingEdges {
-			t := turnDegrees(e.EndHeading, ie.BeginHeading)
-			if !outerSide(t, path, driveOnRight) {
+			if ie.Driveability != vhtypes.DriveForward && ie.Driveability != vhtypes.DriveBoth {
 				continue
 			}
-			a := roundaboutArm{angle: turnDegrees(entryHeading, ie.BeginHeading), node: i, class: ie.RoadClass}
-			switch ie.Driveability {
-			case vhtypes.DriveForward, vhtypes.DriveBoth:
-				exits = append(exits, a)
-			case vhtypes.DriveBackward:
-				entries = append(entries, a)
+			if !outerSide(turnDegrees(e.EndHeading, ie.BeginHeading), path, driveOnRight) {
+				continue
 			}
+			exits = append(exits, roundaboutArm{angle: turnDegrees(entryHeading, ie.BeginHeading)})
 		}
 	}
+	return exits
+}
 
+// sortExits puts exits in the order the roundabout is passed.
+func sortExits(arms []roundaboutArm, driveOnRight bool) {
+	sort.SliceStable(arms, func(i, j int) bool {
+		return armOrderKey(arms[i].angle, driveOnRight) < armOrderKey(arms[j].angle, driveOnRight)
+	})
+}
+
+// RoundaboutExitsFromEdges works out the exits of a roundabout up to the one
+// the route takes, from the edges of the matched route: the road before the
+// roundabout, the roundabout, and the road after it.
+//
+// The exits are found with the same rule Valhalla uses to number them, so the
+// exit taken is the [exitCount]-th. When the result disagrees with Valhalla's
+// count, or the exit taken is not at that position, the second result is false
+// and nothing should be used. The exits after the one taken are not known from
+// these edges: see [FullRoundaboutExits].
+func RoundaboutExitsFromEdges(
+	edges []vhtypes.TraceEdge,
+	exitCount int,
+) (RoundaboutExits, bool) {
+	first, last, ok := ringEdges(edges, true)
+	if !ok {
+		return RoundaboutExits{}, false
+	}
+	driveOnRight := edges[first].DriveOnRight == nil || *edges[first].DriveOnRight
+	entryHeading := edges[first-1].EndHeading
+
+	exits := outerExits(edges, first, last)
 	// Valhalla's count: the exit taken plus every exit passed on the way.
 	if len(exits)+1 != exitCount {
-		return RoundaboutArms{}, false
+		return RoundaboutExits{}, false
 	}
-	taken := roundaboutArm{
-		angle: turnDegrees(entryHeading, edges[last+1].BeginHeading),
-		node:  last,
-		class: edges[last+1].RoadClass,
-	}
+	taken := roundaboutArm{angle: turnDegrees(entryHeading, edges[last+1].BeginHeading)}
 	exits = append(exits, taken)
-
-	key := func(angle int) int { return armOrderKey(angle, driveOnRight) }
-	sort.SliceStable(exits, func(i, j int) bool { return key(exits[i].angle) < key(exits[j].angle) })
+	sortExits(exits, driveOnRight)
 
 	// The exit taken has to be the exitCount-th one passed.
+	key := func(angle int) int { return armOrderKey(angle, driveOnRight) }
 	before, same := 0, 0
 	for _, x := range exits {
 		switch k := key(x.angle); {
@@ -103,44 +136,67 @@ func RoundaboutArmsFromEdges(
 		}
 	}
 	if exitCount < before+1 || exitCount > before+same {
-		return RoundaboutArms{}, false
+		return RoundaboutExits{}, false
 	}
 
-	var result RoundaboutArms
+	result := RoundaboutExits{}
 	for _, x := range exits {
-		result.ExitAngles = append(result.ExitAngles, x.angle)
-	}
-	sort.SliceStable(entries, func(i, j int) bool { return key(entries[i].angle) < key(entries[j].angle) })
-	for _, en := range entries {
-		if isOtherHalfOfExit(en, exits) {
-			continue
-		}
-		result.EntryAngles = append(result.EntryAngles, en.angle)
+		result.Angles = append(result.Angles, x.angle)
 	}
 	return result, true
 }
 
-// roundaboutArm is a road meeting a roundabout: its angle, the roundabout
-// node it leaves from (the index of the edge that ends there) and its class.
-type roundaboutArm struct {
-	angle int
-	node  int
-	class string
-}
+// FullRoundaboutExits works out all exits of a roundabout from the edges of a
+// shape that goes once around it, entered from the road before it. [known] are
+// the exits up to the one the route takes (see [RoundaboutExitsFromEdges]):
+// the walk has to find the same ones first, or it is not the same roundabout
+// and nothing should be used. The road the roundabout was entered from is not
+// an exit of the result.
+func FullRoundaboutExits(
+	edges []vhtypes.TraceEdge,
+	known RoundaboutExits,
+) (RoundaboutExits, bool) {
+	first, last, ok := ringEdges(edges, false)
+	if !ok || len(known.Angles) == 0 {
+		return RoundaboutExits{}, false
+	}
+	driveOnRight := edges[first].DriveOnRight == nil || *edges[first].DriveOnRight
 
-// isOtherHalfOfExit reports whether an entry-only arm is the second half of a
-// two-way road whose first half is an exit: Valhalla draws such a road as two
-// one-way roads on neighbouring nodes.
-func isOtherHalfOfExit(entry roundaboutArm, exits []roundaboutArm) bool {
-	for _, x := range exits {
-		if x.node-entry.node > 1 || entry.node-x.node > 1 || x.class != entry.class {
-			continue
-		}
-		if headingDistance(x.angle, entry.angle) <= pairHeadingDegrees {
-			return true
+	// The walk has to go (nearly) all the way round.
+	sweep := 0
+	for i := first; i <= last; i++ {
+		sweep += signedDegrees(edges[i].BeginHeading, edges[i].EndHeading)
+		if i < last {
+			sweep += signedDegrees(edges[i].EndHeading, edges[i+1].BeginHeading)
 		}
 	}
-	return false
+	if sweep < 0 {
+		sweep = -sweep
+	}
+	if sweep < fullLapDegrees {
+		return RoundaboutExits{}, false
+	}
+
+	arms := outerExits(edges, first, last)
+	sortExits(arms, driveOnRight)
+	var all []int
+	for _, a := range arms {
+		if headingDistance(a.angle, 180) <= entryRoadDegrees {
+			continue
+		}
+		all = append(all, a.angle)
+	}
+
+	// The exits already known come first, and are the same ones.
+	if len(all) < len(known.Angles) {
+		return RoundaboutExits{}, false
+	}
+	for i, a := range known.Angles {
+		if headingDistance(all[i], a) > sameExitDegrees {
+			return RoundaboutExits{}, false
+		}
+	}
+	return RoundaboutExits{Angles: all}, true
 }
 
 // armOrderKey orders angles in the order a roundabout is passed, starting at
@@ -172,6 +228,12 @@ func outerSide(t, path int, driveOnRight bool) bool {
 // turnDegrees is the clockwise turn from heading [from] to heading [to].
 func turnDegrees(from, to int) int {
 	return ((to-from)%360 + 360) % 360
+}
+
+// signedDegrees is the turn from heading [from] to heading [to] in the range
+// -180 to 179: negative is anti-clockwise.
+func signedDegrees(from, to int) int {
+	return ((to-from+540)%360+360)%360 - 180
 }
 
 // headingDistance is the smallest angle between two headings.

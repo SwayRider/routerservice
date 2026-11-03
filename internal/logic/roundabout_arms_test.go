@@ -199,8 +199,10 @@ func TestFullRoundaboutExits_AnglesAreWhereTheExitsAreRoundTheRing(t *testing.T)
 	if !ok {
 		t.Fatal("want ok")
 	}
-	// The tunnel at 290 is 6 degrees from the exit taken at 296: not a road of its own.
-	if want := []int{109, 50, 20, 296}; !reflect.DeepEqual(got.Angles, want) {
+	// The tunnel at 290 is 6 degrees from the exit taken at 296: not a road of its
+	// own. Each angle is halfway between the position and the heading: the
+	// 109 and 49 give 79, and so on.
+	if want := []int{79, 20, 350, 266}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }
@@ -217,7 +219,7 @@ func TestFullRoundaboutExits_AnExitFarEnoughAfterOursIsKept(t *testing.T) {
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{109, 50, 296, 270}; !reflect.DeepEqual(got.Angles, want) {
+	if want := []int{79, 20, 266, 240}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }
@@ -234,7 +236,7 @@ func TestFullRoundaboutExits_ExitsUpToOursAreNeverLeftOut(t *testing.T) {
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{100, 90, 340}; !reflect.DeepEqual(got.Angles, want) {
+	if want := []int{70, 60, 310}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }
@@ -250,7 +252,7 @@ func TestFullRoundaboutExits_TheRoadWeCameFromIsNotAnExit(t *testing.T) {
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{90}; !reflect.DeepEqual(got.Angles, want) {
+	if want := []int{60}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }
@@ -273,7 +275,7 @@ func TestFullRoundaboutExits_LeftHandTrafficMirrors(t *testing.T) {
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{251, 310, 64}; !reflect.DeepEqual(got.Angles, want) {
+	if want := []int{281, 340, 94}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }
@@ -340,7 +342,23 @@ func TestFullRoundaboutExits_NotDrivableAndEntryOnlyAreNotExits(t *testing.T) {
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{109}; !reflect.DeepEqual(got.Angles, want) {
+	if want := []int{79}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
+	}
+}
+
+func TestHalfway(t *testing.T) {
+	for _, c := range []struct{ a, b, want int }{
+		{109, 49, 79},
+		{50, 350, 20},   // across north
+		{350, 50, 20},   // the other way round
+		{10, 350, 0},    // straight on between them
+		{90, 90, 90},    // the same
+		{0, 180, 270},   // exactly opposite: 270 (the turn is -180)
+		{300, 240, 270}, // west
+	} {
+		if got := halfway(c.a, c.b); got != c.want {
+			t.Errorf("halfway(%d, %d) = %d, want %d", c.a, c.b, got, c.want)
+		}
 	}
 }

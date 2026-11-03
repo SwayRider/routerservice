@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"sync"
 	"testing"
@@ -16,8 +17,9 @@ type fakeTracer struct {
 	mu       sync.Mutex
 	requests []*vhtypes.TraceAttributesRequest
 	regions  []string
-	resp     *vhtypes.TraceAttributesResponse
-	err      error
+	// answer is called for every lookup; the shape match of the request tells
+	// the lookup over the route (edge_walk) from the lap (map_snap).
+	answer func(req *vhtypes.TraceAttributesRequest) (*vhtypes.TraceAttributesResponse, error)
 }
 
 func (f *fakeTracer) TraceAttributes(
@@ -29,16 +31,82 @@ func (f *fakeTracer) TraceAttributes(
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, req)
 	f.regions = append(f.regions, region)
-	return f.resp, f.err
+	return f.answer(req)
 }
 
-// roundaboutRoute is a route with a ten point shape and a roundabout from
-// point 4 to point 7, entered at maneuver 1 and left at maneuver 2.
-func roundaboutRoute(t *testing.T, exitCount int) *vhtypes.RouteResponse {
+func (f *fakeTracer) matches() []string {
+	var out []string
+	for _, r := range f.requests {
+		out = append(out, r.ShapeMatch)
+	}
+	return out
+}
+
+func ringEdge(begin, end int, arms ...vhtypes.TraceIntersectingEdge) vhtypes.TraceEdge {
+	e := vhtypes.TraceEdge{Roundabout: true, BeginHeading: begin, EndHeading: end}
+	if len(arms) > 0 {
+		e.EndNode = &vhtypes.TraceNode{IntersectingEdges: arms}
+	}
+	return e
+}
+
+func arm(heading int) vhtypes.TraceIntersectingEdge {
+	return vhtypes.TraceIntersectingEdge{BeginHeading: heading, Driveability: "forward", RoadClass: "residential"}
+}
+
+func roadEdge(begin, end int) vhtypes.TraceEdge {
+	return vhtypes.TraceEdge{BeginHeading: begin, EndHeading: end}
+}
+
+// firstExitTaken is the route over a roundabout that leaves by the east exit,
+// the first one.
+func firstExitTaken() *vhtypes.TraceAttributesResponse {
+	return &vhtypes.TraceAttributesResponse{Edges: []vhtypes.TraceEdge{
+		roadEdge(0, 0), ringEdge(80, 50), roadEdge(90, 90),
+	}}
+}
+
+// lapOf is a lap round the same roundabout: east, north and west exits and the
+// road the roundabout was entered from. [east] is the heading of the east exit.
+func lapOf(east int) *vhtypes.TraceAttributesResponse {
+	return &vhtypes.TraceAttributesResponse{Edges: []vhtypes.TraceEdge{
+		roadEdge(0, 0),
+		ringEdge(80, 50, arm(east)),
+		ringEdge(40, 10),
+		ringEdge(0, 330, arm(0)),
+		ringEdge(320, 290),
+		ringEdge(280, 250, arm(270)),
+		ringEdge(240, 210),
+		ringEdge(200, 170, arm(180)),
+	}}
+}
+
+func answers(route, lap func() *vhtypes.TraceAttributesResponse) func(*vhtypes.TraceAttributesRequest) (*vhtypes.TraceAttributesResponse, error) {
+	return func(req *vhtypes.TraceAttributesRequest) (*vhtypes.TraceAttributesResponse, error) {
+		if req.ShapeMatch == "map_snap" {
+			return lap(), nil
+		}
+		return route(), nil
+	}
+}
+
+// circleRoute is a route with a straight approach, a roundabout of the given
+// radius (13 points over a third of the circle) and a short way out. The
+// roundabout is entered at maneuver 1 and left at maneuver 2.
+func circleRoute(t *testing.T, radius float64, exitCount int) *vhtypes.RouteResponse {
 	t.Helper()
-	flat := make([]float64, 0, 20)
-	for i := 0; i < 10; i++ {
-		flat = append(flat, 51+float64(i)*0.001, 4)
+	const lat0, lon0 = 51.0, 4.0
+	cosLat := math.Cos(lat0 * math.Pi / 180)
+	var flat []float64
+	for i := 0; i < 5; i++ { // approach, from the south
+		flat = append(flat, lat0-float64(5-i)*0.0001, lon0)
+	}
+	for i := 0; i < 13; i++ { // roundabout
+		a := float64(i) * 10 * math.Pi / 180
+		flat = append(flat, lat0+radius*math.Sin(a)/111320, lon0+radius*math.Cos(a)/(cosLat*111320))
+	}
+	for i := 0; i < 3; i++ { // way out
+		flat = append(flat, lat0+radius*math.Sin(2.1)/111320+float64(i+1)*0.0001, lon0+radius*math.Cos(2.1)/(cosLat*111320))
 	}
 	shape, err := polylineCodec.EncodeFlatCoords(nil, flat)
 	if err != nil {
@@ -47,112 +115,152 @@ func roundaboutRoute(t *testing.T, exitCount int) *vhtypes.RouteResponse {
 	return &vhtypes.RouteResponse{Trip: vhtypes.Trip{Legs: []vhtypes.Leg{{
 		Shape: string(shape),
 		Maneuvers: []vhtypes.Maneuver{
-			{Type: 2, BeginShapeIndex: 0, EndShapeIndex: 4},
-			{Type: maneuverRoundaboutEnter, BeginShapeIndex: 4, EndShapeIndex: 6, RoundaboutExitCount: intPtr(exitCount)},
-			{Type: maneuverRoundaboutExit, BeginShapeIndex: 6, EndShapeIndex: 7},
-			{Type: 4, BeginShapeIndex: 7, EndShapeIndex: 9},
+			{Type: 2, BeginShapeIndex: 0, EndShapeIndex: 5},
+			{Type: maneuverRoundaboutEnter, BeginShapeIndex: 5, EndShapeIndex: 17, RoundaboutExitCount: intPtr(exitCount)},
+			{Type: maneuverRoundaboutExit, BeginShapeIndex: 17, EndShapeIndex: 20},
+			{Type: 4, BeginShapeIndex: 20, EndShapeIndex: 20},
 		},
 	}}}}
 }
 
-// fourArmsResponse is what Valhalla returns for a roundabout whose third exit is taken.
-func fourArmsResponse() *vhtypes.TraceAttributesResponse {
-	ring := func(begin, end int, arms ...vhtypes.TraceIntersectingEdge) vhtypes.TraceEdge {
-		e := vhtypes.TraceEdge{Roundabout: true, BeginHeading: begin, EndHeading: end}
-		if len(arms) > 0 {
-			e.EndNode = &vhtypes.TraceNode{IntersectingEdges: arms}
-		}
-		return e
-	}
-	return &vhtypes.TraceAttributesResponse{Edges: []vhtypes.TraceEdge{
-		{BeginHeading: 0, EndHeading: 0},
-		ring(60, 30, vhtypes.TraceIntersectingEdge{BeginHeading: 90, Driveability: "forward", RoadClass: "residential"}),
-		ring(10, 340, vhtypes.TraceIntersectingEdge{BeginHeading: 0, Driveability: "forward", RoadClass: "residential"}),
-		ring(340, 300),
-		{BeginHeading: 270, EndHeading: 270},
-	}}
+func exitsOf(route *vhtypes.RouteResponse) []int {
+	return route.Trip.Legs[0].Maneuvers[1].RoundaboutExitAngles
 }
 
-func TestAddRoundaboutArms_FillsTheManeuver(t *testing.T) {
-	tracer := &fakeTracer{resp: fourArmsResponse()}
-	route := roundaboutRoute(t, 3)
-
+func run(t *testing.T, tracer *fakeTracer, route *vhtypes.RouteResponse) {
+	t.Helper()
 	addRoundaboutArms(context.Background(), tracer, "be", time.Second, route, log.New())
+}
 
-	m := route.Trip.Legs[0].Maneuvers[1]
-	if want := []int{90, 0, 270}; !reflect.DeepEqual(m.RoundaboutExitAngles, want) {
-		t.Errorf("RoundaboutExitAngles = %v, want %v", m.RoundaboutExitAngles, want)
+func TestAddRoundaboutArms_AllExitsOfTheRoundabout(t *testing.T) {
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	route := circleRoute(t, 30, 1)
+
+	run(t, tracer, route)
+
+	if want := []int{90, 0, 270}; !reflect.DeepEqual(exitsOf(route), want) {
+		t.Errorf("exits = %v, want %v (the exits after the one taken as well)", exitsOf(route), want)
 	}
-	if len(tracer.requests) != 1 {
-		t.Fatalf("lookups = %d, want 1 (only the roundabout)", len(tracer.requests))
+	if want := []string{"edge_walk", "map_snap"}; !reflect.DeepEqual(tracer.matches(), want) {
+		t.Errorf("lookups = %v, want %v", tracer.matches(), want)
 	}
-	if tracer.regions[0] != "be" {
-		t.Errorf("region = %q, want be", tracer.regions[0])
+	for _, r := range tracer.regions {
+		if r != "be" {
+			t.Errorf("region = %q, want be", r)
+		}
 	}
-	// Points 1..8: three before the roundabout (4), two after its end (7).
-	if got := len(tracer.requests[0].Shape); got != 8 {
-		t.Errorf("shape points = %d, want 8", got)
+	// The lap goes on round the circle after the route's own points: 3 before
+	// the roundabout, its 13 points, and the 23 that carry on to the entry.
+	if got := len(tracer.requests[1].Shape); got != 3+13+23 {
+		t.Errorf("lap shape points = %d, want %d", got, 3+13+23)
 	}
-	if tracer.requests[0].ShapeMatch != "edge_walk" {
-		t.Errorf("ShapeMatch = %q, want edge_walk", tracer.requests[0].ShapeMatch)
+	if got := len(tracer.requests[0].Shape); got != 3+13+3 {
+		t.Errorf("route shape points = %d, want %d", got, 3+13+3)
 	}
 }
 
-func TestAddRoundaboutArms_LookupFailureLeavesTheRoute(t *testing.T) {
-	route := roundaboutRoute(t, 3)
+func TestAddRoundaboutArms_LapFailureLeavesNoExits(t *testing.T) {
+	tracer := &fakeTracer{answer: func(req *vhtypes.TraceAttributesRequest) (*vhtypes.TraceAttributesResponse, error) {
+		if req.ShapeMatch == "map_snap" {
+			return nil, errors.New("valhalla slow")
+		}
+		return firstExitTaken(), nil
+	}}
+	route := circleRoute(t, 30, 1)
 
-	addRoundaboutArms(context.Background(), &fakeTracer{err: errors.New("valhalla down")}, "be", time.Second, route, log.New())
+	run(t, tracer, route)
 
-	m := route.Trip.Legs[0].Maneuvers[1]
-	if m.RoundaboutExitAngles != nil || m.RoundaboutEntryAngles != nil {
-		t.Errorf("got arms %v / %v, want none", m.RoundaboutExitAngles, m.RoundaboutEntryAngles)
+	// Never the partial list: the app would draw a roundabout with one road.
+	if exitsOf(route) != nil {
+		t.Errorf("exits = %v, want none", exitsOf(route))
 	}
 	if len(route.Trip.Legs[0].Maneuvers) != 4 {
-		t.Error("the maneuvers must be left as they were")
+		t.Error("the route must be left as it was")
+	}
+}
+
+func TestAddRoundaboutArms_RouteLookupFailureLeavesNoExits(t *testing.T) {
+	tracer := &fakeTracer{answer: func(*vhtypes.TraceAttributesRequest) (*vhtypes.TraceAttributesResponse, error) {
+		return nil, errors.New("valhalla down")
+	}}
+	route := circleRoute(t, 30, 1)
+
+	run(t, tracer, route)
+
+	if exitsOf(route) != nil {
+		t.Errorf("exits = %v, want none", exitsOf(route))
+	}
+	if got := tracer.matches(); !reflect.DeepEqual(got, []string{"edge_walk"}) {
+		t.Errorf("lookups = %v: without the route lookup there is no lap to ask for", got)
 	}
 }
 
 func TestAddRoundaboutArms_DisagreementWithExitCountIsIgnored(t *testing.T) {
-	route := roundaboutRoute(t, 5) // the lookup finds 3 exits
-	addRoundaboutArms(context.Background(), &fakeTracer{resp: fourArmsResponse()}, "be", time.Second, route, log.New())
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	route := circleRoute(t, 30, 3) // the lookup finds the first exit
 
-	if got := route.Trip.Legs[0].Maneuvers[1].RoundaboutExitAngles; got != nil {
-		t.Errorf("got %v, want none", got)
+	run(t, tracer, route)
+
+	if exitsOf(route) != nil {
+		t.Errorf("exits = %v, want none", exitsOf(route))
+	}
+}
+
+func TestAddRoundaboutArms_LapThatIsAnotherRoundaboutIsIgnored(t *testing.T) {
+	// The lap finds the east exit at 150 degrees, not the 90 of the route.
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(150) })}
+	route := circleRoute(t, 30, 1)
+
+	run(t, tracer, route)
+
+	if exitsOf(route) != nil {
+		t.Errorf("exits = %v, want none", exitsOf(route))
+	}
+}
+
+func TestAddRoundaboutArms_RoundaboutThatIsNotRoundIsNotWalked(t *testing.T) {
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	route := circleRoute(t, 400, 1) // not a roundabout's size
+
+	run(t, tracer, route)
+
+	if exitsOf(route) != nil {
+		t.Errorf("exits = %v, want none", exitsOf(route))
+	}
+	if got := tracer.matches(); !reflect.DeepEqual(got, []string{"edge_walk"}) {
+		t.Errorf("lookups = %v, want only the route lookup", got)
 	}
 }
 
 func TestAddRoundaboutArms_NoRoundaboutNoLookup(t *testing.T) {
-	tracer := &fakeTracer{resp: fourArmsResponse()}
-	route := roundaboutRoute(t, 3)
+	tracer := &fakeTracer{answer: answers(firstExitTaken, func() *vhtypes.TraceAttributesResponse { return lapOf(90) })}
+	route := circleRoute(t, 30, 1)
 	route.Trip.Legs[0].Maneuvers = route.Trip.Legs[0].Maneuvers[:1]
 
-	addRoundaboutArms(context.Background(), tracer, "be", time.Second, route, log.New())
+	run(t, tracer, route)
 
 	if len(tracer.requests) != 0 {
 		t.Errorf("lookups = %d, want 0", len(tracer.requests))
 	}
 }
 
-func TestCreateManeuver_RoundaboutArms(t *testing.T) {
-	got, err := createManeuver(&vhtypes.Maneuver{
-		RoundaboutExitAngles:  []int{90, 0, 270},
-		RoundaboutEntryAngles: []int{30},
-	}, log.New())
+func TestCreateManeuver_RoundaboutExits(t *testing.T) {
+	got, err := createManeuver(&vhtypes.Maneuver{RoundaboutExitAngles: []int{90, 0, 270}}, log.New())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []int32{90, 0, 270}; !reflect.DeepEqual(got.RoundaboutExitAngles, want) {
 		t.Errorf("RoundaboutExitAngles = %v, want %v", got.RoundaboutExitAngles, want)
 	}
-	if want := []int32{30}; !reflect.DeepEqual(got.RoundaboutEntryAngles, want) {
-		t.Errorf("RoundaboutEntryAngles = %v, want %v", got.RoundaboutEntryAngles, want)
+	if got.RoundaboutEntryAngles != nil {
+		t.Errorf("RoundaboutEntryAngles = %v: the router no longer sends them", got.RoundaboutEntryAngles)
 	}
 
 	none, err := createManeuver(&vhtypes.Maneuver{}, log.New())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if none.RoundaboutExitAngles != nil || none.RoundaboutEntryAngles != nil {
-		t.Error("no arms known: both lists must be empty")
+	if none.RoundaboutExitAngles != nil {
+		t.Error("no exits known: the list must be empty")
 	}
 }

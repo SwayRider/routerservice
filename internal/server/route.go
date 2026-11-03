@@ -884,7 +884,6 @@ func createManeuver(
 	}
 
 	maneuver.RoundaboutExitAngles = int32s(vhManeuver.RoundaboutExitAngles)
-	maneuver.RoundaboutEntryAngles = int32s(vhManeuver.RoundaboutEntryAngles)
 
 	maneuver.DepartInstruction = vhManeuver.DepartInstruction
 	maneuver.VerbalDepartInstruction = vhManeuver.VerbalDepartInstruction

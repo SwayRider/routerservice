@@ -165,11 +165,13 @@ func RoundaboutExitsFromEdges(
 // the walk has to find the same ones first, by the heading they leave at, or
 // it is not the same roundabout and nothing should be used.
 //
-// The angle of an exit is where it is round the ring, not the heading of its
-// lane, which leaves almost along the ring and says little about where the
-// road is: the bearing from the centre of the roundabout to the exit's node,
-// relative to the heading on entry. The road the roundabout was entered from is
-// not an exit of the result. After the exit taken, an exit within
+// The angle of an exit is between two things, both relative to the heading on
+// entry. Where the exit's node is round the ring (the bearing from the centre
+// of the roundabout to it) puts the road too far round, as the road leaves
+// along the ring and then straightens out. The heading of its lane puts it too
+// little round, as that heading is not where the road ends up. Halfway between
+// them is nearer to where the rider sees the road. The road the roundabout was
+// entered from is not an exit of the result. After the exit taken, an exit within
 // [nearbyExitDegrees] of the one before it is left out: it is not a road of
 // its own. Exits up to the one taken are never left out, as Valhalla counts
 // them in the exit it speaks of.
@@ -236,16 +238,23 @@ func FullRoundaboutExits(
 		if headingDistance(all[i].heading, a) > sameExitDegrees {
 			return RoundaboutExits{}, false
 		}
-		result.Angles = append(result.Angles, all[i].position)
+		result.Angles = append(result.Angles, halfway(all[i].position, all[i].heading))
 	}
+	previous := all[len(known.Angles)-1].position
 	for _, x := range all[len(known.Angles):] {
-		previous := result.Angles[len(result.Angles)-1]
 		if headingDistance(x.position, previous) <= nearbyExitDegrees {
 			continue
 		}
-		result.Angles = append(result.Angles, x.position)
+		previous = x.position
+		result.Angles = append(result.Angles, halfway(x.position, x.heading))
 	}
 	return result, true
+}
+
+// halfway is the angle halfway between angles [a] and [b] (0 to 359), going the
+// short way round.
+func halfway(a, b int) int {
+	return ((a+signedDegrees(a, b)/2)%360 + 360) % 360
 }
 
 // armOrderKey orders angles in the order a roundabout is passed, starting at

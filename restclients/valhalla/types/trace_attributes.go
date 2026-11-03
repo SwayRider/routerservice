@@ -24,17 +24,24 @@ type TraceAttributesRequest struct {
 // TraceAttributesResponse holds the edges of the matched shape. Only the
 // fields the router uses are decoded.
 type TraceAttributesResponse struct {
+	// Shape is the matched path as an encoded polyline (6 digits). The shape
+	// indices of the edges are positions in it.
+	Shape string      `json:"shape,omitempty"`
 	Edges []TraceEdge `json:"edges"`
 }
 
 // TraceEdge is one edge of the matched shape.
 type TraceEdge struct {
-	Roundabout   bool       `json:"roundabout"`
-	BeginHeading int        `json:"begin_heading"`
-	EndHeading   int        `json:"end_heading"`
-	RoadClass    string     `json:"road_class"`
-	DriveOnRight *bool      `json:"drive_on_right,omitempty"`
-	EndNode      *TraceNode `json:"end_node,omitempty"`
+	Roundabout   bool   `json:"roundabout"`
+	BeginHeading int    `json:"begin_heading"`
+	EndHeading   int    `json:"end_heading"`
+	RoadClass    string `json:"road_class"`
+	// BeginShapeIndex and EndShapeIndex are the positions of the edge's first
+	// and last point in the response's Shape.
+	BeginShapeIndex int        `json:"begin_shape_index"`
+	EndShapeIndex   int        `json:"end_shape_index"`
+	DriveOnRight    *bool      `json:"drive_on_right,omitempty"`
+	EndNode         *TraceNode `json:"end_node,omitempty"`
 }
 
 // TraceNode is the node at the end of a [TraceEdge].

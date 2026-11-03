@@ -34,9 +34,12 @@ const (
 )
 
 var roundaboutTraceAttributes = []string{
+	"shape",
 	"edge.roundabout",
 	"edge.begin_heading",
 	"edge.end_heading",
+	"edge.begin_shape_index",
+	"edge.end_shape_index",
 	"edge.road_class",
 	"edge.drive_on_right",
 	"node.intersecting_edge.begin_heading",
@@ -155,7 +158,15 @@ func lookUpRoundaboutExits(
 	if err != nil {
 		return nil, "lap lookup failed: " + err.Error()
 	}
-	all, ok := logic.FullRoundaboutExits(full.Edges, known)
+	flat, _, err := polylineCodec.DecodeFlatCoords(nil, []byte(full.Shape))
+	if err != nil || len(flat) < 4 {
+		return nil, "lap lookup has no shape"
+	}
+	matched := make([]vhtypes.ShapePoint, 0, len(flat)/2)
+	for i := 0; i+1 < len(flat); i += 2 {
+		matched = append(matched, vhtypes.ShapePoint{Lat: flat[i], Lon: flat[i+1]})
+	}
+	all, ok := logic.FullRoundaboutExits(full.Edges, matched, known)
 	if !ok {
 		return nil, "lap lookup does not match the route lookup"
 	}

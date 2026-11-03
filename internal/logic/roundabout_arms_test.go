@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/swayrider/routerservice/internal/logic/logictest"
 	vhtypes "github.com/swayrider/routerservice/restclients/valhalla/types"
 )
 
@@ -157,91 +158,189 @@ func TestRoundaboutExits_SplitCarriageways(t *testing.T) {
 	}
 }
 
-// lap is a full lap round the roundabout of fourArms, entered heading north:
-// the edges go on past the west exit and round to the road the roundabout
-// was entered from.
-func lap(extra ...vhtypes.TraceIntersectingEdge) []vhtypes.TraceEdge {
-	return []vhtypes.TraceEdge{
-		road(0, 0),
-		ring(80, 50, append([]vhtypes.TraceIntersectingEdge{ie(90, "forward", "residential")}, extra...)...),
-		ring(40, 10),
-		ring(0, 330, ie(0, "forward", "residential")),
-		ring(320, 290),
-		ring(280, 250, ie(270, "forward", "residential")),
-		ring(240, 210),
-		ring(200, 170, ie(180, "forward", "secondary")),
+// montgomeryLap is the roundabout of the user's route: 109, 50, 20 and 296
+// degrees round from the road of entry (positions in the compass sense,
+// relative to the heading on entry), then a tunnel at 290 right after the
+// fourth, and the end of the lap. Every exit leaves 60 degrees off the
+// tangent of the ring, so its heading says little about where it is.
+func montgomeryLap(extra ...logictest.Node) ([]vhtypes.TraceEdge, []vhtypes.ShapePoint) {
+	nodes := []logictest.Node{
+		{Travelled: 71, Arms: []logictest.Arm{logictest.ExitArm(30)}},  // position 109
+		{Travelled: 130, Arms: []logictest.Arm{logictest.ExitArm(30)}}, // position 50
+		{Travelled: 160, Arms: []logictest.Arm{logictest.ExitArm(30)}}, // position 20
+		{Travelled: 244, Arms: []logictest.Arm{logictest.ExitArm(30)}}, // position 296
+		{Travelled: 250, Arms: []logictest.Arm{logictest.ExitArm(30)}}, // position 290: the tunnel
+		{Travelled: 330},
 	}
+	return logictest.LapAround(49, false, append(nodes, extra...))
 }
 
-func TestFullRoundaboutExits_AllExitsExceptTheRoadWeCameFrom(t *testing.T) {
-	// Taking the first exit, only the east exit is known; the lap finds the rest.
-	got, ok := FullRoundaboutExits(lap(), RoundaboutExits{Angles: []int{90}})
+// headingsOf are the headings of the exits of montgomeryLap up to the nth,
+// as the lookup over the route would give them.
+func headingsOf(edges []vhtypes.TraceEdge, n int) RoundaboutExits {
+	arms := outerExits(edges, 1, len(edges)-1)
+	sortExits(arms, true)
+	var known RoundaboutExits
+	for _, a := range arms[:n] {
+		known.Angles = append(known.Angles, a.angle)
+	}
+	return known
+}
+
+func TestFullRoundaboutExits_AnglesAreWhereTheExitsAreRoundTheRing(t *testing.T) {
+	edges, shape := montgomeryLap()
+	known := headingsOf(edges, 4)
+	// The headings are far from the positions: 49 for the 109, 350 for the 50, ...
+	if want := []int{49, 350, 320, 236}; !reflect.DeepEqual(known.Angles, want) {
+		t.Fatalf("headings = %v, want %v", known.Angles, want)
+	}
+
+	got, ok := FullRoundaboutExits(edges, shape, known)
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{90, 0, 270}; !reflect.DeepEqual(got.Angles, want) {
-		t.Errorf("got %v, want %v (the road we came from, at 180, is not an exit)", got.Angles, want)
-	}
-}
-
-func TestFullRoundaboutExits_LateExit(t *testing.T) {
-	got, ok := FullRoundaboutExits(lap(), RoundaboutExits{Angles: []int{90, 0, 270}})
-	if !ok {
-		t.Fatal("want ok")
-	}
-	if want := []int{90, 0, 270}; !reflect.DeepEqual(got.Angles, want) {
+	// The tunnel at 290 is 6 degrees from the exit taken at 296: not a road of its own.
+	if want := []int{109, 50, 20, 296}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }
 
-func TestFullRoundaboutExits_LeftHandTraffic(t *testing.T) {
-	got, ok := FullRoundaboutExits(mirrored(lap()), RoundaboutExits{Angles: []int{270}})
+func TestFullRoundaboutExits_AnExitFarEnoughAfterOursIsKept(t *testing.T) {
+	edges, shape := logictest.LapAround(49, false, []logictest.Node{
+		{Travelled: 71, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 130, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 244, Arms: []logictest.Arm{logictest.ExitArm(30)}}, // position 296: taken
+		{Travelled: 270, Arms: []logictest.Arm{logictest.ExitArm(30)}}, // position 270: 26 degrees on
+		{Travelled: 330},
+	})
+	got, ok := FullRoundaboutExits(edges, shape, headingsOf(edges, 3))
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{270, 0, 90}; !reflect.DeepEqual(got.Angles, want) {
+	if want := []int{109, 50, 296, 270}; !reflect.DeepEqual(got.Angles, want) {
+		t.Errorf("got %v, want %v", got.Angles, want)
+	}
+}
+
+func TestFullRoundaboutExits_ExitsUpToOursAreNeverLeftOut(t *testing.T) {
+	// Two exits 10 degrees apart before ours: Valhalla counts both.
+	edges, shape := logictest.LapAround(49, false, []logictest.Node{
+		{Travelled: 80, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 90, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 200, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 330},
+	})
+	got, ok := FullRoundaboutExits(edges, shape, headingsOf(edges, 3))
+	if !ok {
+		t.Fatal("want ok")
+	}
+	if want := []int{100, 90, 340}; !reflect.DeepEqual(got.Angles, want) {
+		t.Errorf("got %v, want %v", got.Angles, want)
+	}
+}
+
+func TestFullRoundaboutExits_TheRoadWeCameFromIsNotAnExit(t *testing.T) {
+	edges, shape := logictest.LapAround(49, false, []logictest.Node{
+		{Travelled: 90, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 200},
+		{Travelled: 300},
+		{Travelled: 350, Arms: []logictest.Arm{logictest.ExitArm(30)}}, // back at the road of entry
+	})
+	got, ok := FullRoundaboutExits(edges, shape, headingsOf(edges, 1))
+	if !ok {
+		t.Fatal("want ok")
+	}
+	if want := []int{90}; !reflect.DeepEqual(got.Angles, want) {
+		t.Errorf("got %v, want %v", got.Angles, want)
+	}
+}
+
+func TestFullRoundaboutExits_LeftHandTrafficMirrors(t *testing.T) {
+	edges, shape := logictest.LapAround(49, true, []logictest.Node{
+		{Travelled: 71, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 130, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 244, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 250, Arms: []logictest.Arm{logictest.ExitArm(30)}},
+		{Travelled: 330},
+	})
+	arms := outerExits(edges, 1, len(edges)-1)
+	sortExits(arms, false)
+	var known RoundaboutExits
+	for _, a := range arms[:3] {
+		known.Angles = append(known.Angles, a.angle)
+	}
+	got, ok := FullRoundaboutExits(edges, shape, known)
+	if !ok {
+		t.Fatal("want ok")
+	}
+	if want := []int{251, 310, 64}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }
 
 func TestFullRoundaboutExits_MustAgreeWithTheRouteLookup(t *testing.T) {
+	edges, shape := montgomeryLap()
 	for name, known := range map[string][]int{
-		"another first exit":      {120},
-		"more exits than the lap": {90, 0, 270, 200},
-		"an exit the lap lacks":   {90, 45},
+		"another first exit":      {80},
+		"more exits than the lap": {49, 350, 320, 236, 230, 10, 20},
 		"nothing known":           {},
 	} {
-		if got, ok := FullRoundaboutExits(lap(), RoundaboutExits{Angles: known}); ok {
+		if got, ok := FullRoundaboutExits(edges, shape, RoundaboutExits{Angles: known}); ok {
 			t.Errorf("%s: got %+v, want not ok", name, got)
 		}
 	}
 }
 
-func TestFullRoundaboutExits_AnExitInsideTheTolerance(t *testing.T) {
-	if _, ok := FullRoundaboutExits(lap(), RoundaboutExits{Angles: []int{97}}); !ok {
-		t.Error("7 degrees apart is the same exit")
+func TestFullRoundaboutExits_NeedsAShapeThatFits(t *testing.T) {
+	edges, shape := montgomeryLap()
+	known := headingsOf(edges, 4)
+	if _, ok := FullRoundaboutExits(edges, nil, known); ok {
+		t.Error("no shape: want not ok")
+	}
+	if _, ok := FullRoundaboutExits(edges, shape[:6], known); ok {
+		t.Error("shape too short for the indices: want not ok")
+	}
+	broken := append([]vhtypes.TraceEdge{}, edges...)
+	broken[2].EndShapeIndex = -3
+	if _, ok := FullRoundaboutExits(broken, shape, known); ok {
+		t.Error("an index outside the shape: want not ok")
+	}
+	if _, ok := FullRoundaboutExits(edges, lapAroundShape(400), known); ok {
+		t.Error("a shape that is not a roundabout's size: want not ok")
 	}
 }
 
+// lapAroundShape is the shape of a lap of the given radius, as logictest.LapAround makes it.
+func lapAroundShape(radius float64) []vhtypes.ShapePoint {
+	_, shape := logictest.LapAround(radius, false, []logictest.Node{{Travelled: 71}, {Travelled: 130}, {Travelled: 160}, {Travelled: 244}, {Travelled: 250}, {Travelled: 330}})
+	return shape
+}
+
 func TestFullRoundaboutExits_NeedsAWholeLap(t *testing.T) {
-	// The walk stopped half way round.
-	if got, ok := FullRoundaboutExits(lap()[:5], RoundaboutExits{Angles: []int{90}}); ok {
-		t.Errorf("got %+v, want not ok", got)
+	edges, shape := montgomeryLap()
+	if got, ok := FullRoundaboutExits(edges[:4], shape, headingsOf(edges, 2)); ok {
+		t.Errorf("got %+v, want not ok: the walk stopped half way", got)
 	}
-	if _, ok := FullRoundaboutExits([]vhtypes.TraceEdge{road(0, 0), road(0, 0)}, RoundaboutExits{Angles: []int{90}}); ok {
+	if _, ok := FullRoundaboutExits([]vhtypes.TraceEdge{road(0, 0), road(0, 0)}, shape, RoundaboutExits{Angles: []int{90}}); ok {
 		t.Error("no roundabout: want not ok")
 	}
 }
 
 func TestFullRoundaboutExits_NotDrivableAndEntryOnlyAreNotExits(t *testing.T) {
-	got, ok := FullRoundaboutExits(
-		lap(ie(120, "backward", "tertiary"), ie(100, "", "service_other")),
-		RoundaboutExits{Angles: []int{90}},
-	)
+	edges, shape := logictest.LapAround(49, false, []logictest.Node{
+		{Travelled: 71, Arms: []logictest.Arm{
+			logictest.ExitArm(30),
+			{Off: 20, Drive: "backward", Class: "tertiary"},
+			{Off: 40, Drive: "", Class: "service_other"},
+		}},
+		{Travelled: 200},
+		{Travelled: 330},
+	})
+	got, ok := FullRoundaboutExits(edges, shape, headingsOf(edges, 1))
 	if !ok {
 		t.Fatal("want ok")
 	}
-	if want := []int{90, 0, 270}; !reflect.DeepEqual(got.Angles, want) {
+	if want := []int{109}; !reflect.DeepEqual(got.Angles, want) {
 		t.Errorf("got %v, want %v", got.Angles, want)
 	}
 }

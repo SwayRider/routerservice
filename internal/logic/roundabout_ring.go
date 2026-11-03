@@ -30,32 +30,11 @@ const (
 // too few of them, a radius that is not a roundabout's, or points that are not
 // on a circle.
 func ExtendAroundRing(ring []vhtypes.ShapePoint) ([]vhtypes.ShapePoint, bool) {
-	if len(ring) < minRingPoints {
+	fit, ok := fitRing(ring)
+	if !ok {
 		return nil, false
 	}
-
-	// Local flat coordinates in meters around the first point.
-	lat0, lon0 := ring[0].Lat, ring[0].Lon
-	cosLat := math.Cos(lat0 * math.Pi / 180)
-	xs := make([]float64, len(ring))
-	ys := make([]float64, len(ring))
-	for i, p := range ring {
-		xs[i] = (p.Lon - lon0) * cosLat * metersPerDegree
-		ys[i] = (p.Lat - lat0) * metersPerDegree
-	}
-
-	cx, cy, r, ok := fitCircle(xs, ys)
-	if !ok || r < minRingRadius || r > maxRingRadius {
-		return nil, false
-	}
-	var squares float64
-	for i := range xs {
-		d := math.Hypot(xs[i]-cx, ys[i]-cy) - r
-		squares += d * d
-	}
-	if math.Sqrt(squares/float64(len(xs))) > maxRingResidual*r {
-		return nil, false
-	}
+	xs, ys, cx, cy, r := fit.xs, fit.ys, fit.cx, fit.cy, fit.r
 
 	// How far round the route has gone, and in which direction (positive is
 	// counter-clockwise).
@@ -77,11 +56,60 @@ func ExtendAroundRing(ring []vhtypes.ShapePoint) ([]vhtypes.ShapePoint, bool) {
 		a := last + direction*float64(k)*step
 		x, y := cx+r*math.Cos(a), cy+r*math.Sin(a)
 		out = append(out, vhtypes.ShapePoint{
-			Lat: lat0 + y/metersPerDegree,
-			Lon: lon0 + x/(cosLat*metersPerDegree),
+			Lat: fit.lat0 + y/metersPerDegree,
+			Lon: fit.lon0 + x/(fit.cosLat*metersPerDegree),
 		})
 	}
 	return out, true
+}
+
+// ringFit is a circle fitted through the points of a roundabout, in flat
+// coordinates in meters around the first point.
+type ringFit struct {
+	lat0, lon0, cosLat float64
+	xs, ys             []float64 // the points
+	cx, cy, r          float64   // the circle
+}
+
+// fitRing fits a circle through [ring], and says whether it is a roundabout's:
+// enough points, a radius that is a roundabout's, and points that are on a
+// circle.
+func fitRing(ring []vhtypes.ShapePoint) (ringFit, bool) {
+	if len(ring) < minRingPoints {
+		return ringFit{}, false
+	}
+	f := ringFit{lat0: ring[0].Lat, lon0: ring[0].Lon}
+	f.cosLat = math.Cos(f.lat0 * math.Pi / 180)
+	f.xs = make([]float64, len(ring))
+	f.ys = make([]float64, len(ring))
+	for i, p := range ring {
+		f.xs[i] = (p.Lon - f.lon0) * f.cosLat * metersPerDegree
+		f.ys[i] = (p.Lat - f.lat0) * metersPerDegree
+	}
+
+	var ok bool
+	f.cx, f.cy, f.r, ok = fitCircle(f.xs, f.ys)
+	if !ok || f.r < minRingRadius || f.r > maxRingRadius {
+		return ringFit{}, false
+	}
+	var squares float64
+	for i := range f.xs {
+		d := math.Hypot(f.xs[i]-f.cx, f.ys[i]-f.cy) - f.r
+		squares += d * d
+	}
+	if math.Sqrt(squares/float64(len(f.xs))) > maxRingResidual*f.r {
+		return ringFit{}, false
+	}
+	return f, true
+}
+
+// bearingTo is the compass bearing in degrees, 0 to 360, from the centre of
+// the circle to [p].
+func (f ringFit) bearingTo(p vhtypes.ShapePoint) float64 {
+	x := (p.Lon - f.lon0) * f.cosLat * metersPerDegree
+	y := (p.Lat - f.lat0) * metersPerDegree
+	b := math.Atan2(x-f.cx, y-f.cy) * 180 / math.Pi
+	return math.Mod(b+360, 360)
 }
 
 // fitCircle fits a circle through the points by least squares (Kasa): it
